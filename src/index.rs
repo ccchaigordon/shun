@@ -21,49 +21,34 @@ pub(crate) type DocumentId = usize;
 /// This stores searchable metadata for one indexed repository file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IndexedDocument {
-    /// The stable zero-based identifier assigned from deterministic scanner order.
     pub(crate) id: DocumentId,
-    /// The repository-relative path displayed in search and audit evidence.
     pub(crate) relative_path: PathBuf,
-    /// The developer-facing role used for grouping and future ranking boosts.
     pub(crate) category: FileCategory,
-    /// The unexpanded source-token count used for corpus-length calculations.
     pub(crate) token_count: usize,
 }
 
 /// This records one term's occurrences within one document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Posting {
-    /// The indexed document containing this term.
     pub(crate) document_id: DocumentId,
-    /// The number of source-token positions containing this term in the document.
     pub(crate) term_frequency: usize,
-    /// Zero-based source-token positions for every occurrence.
     pub(crate) positions: Vec<usize>,
-    /// One-based source lines corresponding to every position.
     pub(crate) lines: Vec<usize>,
 }
 
 /// This owns indexed documents, term postings, and corpus statistics.
 #[derive(Debug, PartialEq)]
 pub(crate) struct SearchIndex {
-    /// Indexed file metadata in document-ID order.
     pub(crate) documents: Vec<IndexedDocument>,
-    /// Deterministic normalized-term mappings to document postings.
     pub(crate) postings: BTreeMap<String, Vec<Posting>>,
-    /// The number of indexed documents containing each normalized term.
     pub(crate) document_frequency: BTreeMap<String, usize>,
-    /// The sum of unexpanded source-token counts across all documents.
     pub(crate) total_token_count: usize,
-    /// The mean unexpanded source-token count, or zero for an empty corpus.
     pub(crate) average_document_length: f64,
 }
 
 #[derive(Debug, Default)]
 struct PostingBuilder {
-    /// Occurrence positions collected for one term in the current document.
     positions: Vec<usize>,
-    /// Source lines collected in the same order as occurrence positions.
     lines: Vec<usize>,
 }
 
