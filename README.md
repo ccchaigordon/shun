@@ -10,7 +10,7 @@ The goal is broader than finding files that contain a keyword. Shun is intended 
 - Which implementation and documentation files relate to the same feature?
 - Does the documentation mention paths, commands, options, or symbols that no longer exist?
 
-Shun is developed incrementally. Repository scanning, file classification, and developer-aware tokenization exist today. Search, ranking, symbol extraction, relationship discovery, and documentation auditing remain planned work.
+Shun is developed incrementally. Repository scanning, file classification, developer-aware tokenization, in-memory indexing, and basic ranked search exist today. BM25 ranking, symbol extraction, relationship discovery, and documentation auditing remain planned work.
 
 ## Project Positioning
 
@@ -51,16 +51,18 @@ Implemented:
 - Position-aware and line-aware posting lists.
 - Exact normalized-term lookup.
 - Total and average document-length statistics.
+- Multi-keyword repository search with OR matching by default.
+- Optional AND matching across source query tokens.
+- Deterministic term-frequency ranking.
+- Path, category, score, line number, and source-line snippets for results.
 - Deterministic path-sorted output.
 - Graceful handling of unreadable descendants.
-- Unit tests for classification, scanning, tokenization, and indexing.
+- Unit tests for classification, scanning, tokenization, indexing, queries, ranking, and snippets.
 
 Not implemented yet:
 
-- Search commands.
 - BM25 ranking.
 - Result grouping and explanations.
-- Search snippets.
 - Persistent index storage.
 - Rust symbol extraction.
 - Symbol-reference estimation.
@@ -68,7 +70,7 @@ Not implemented yet:
 - Related-file discovery.
 - Documentation consistency auditing.
 
-The current `index` command scans repository files, builds an in-memory index, and reports corpus statistics. It does not save the index or provide search yet.
+The current `index` command scans repository files, builds an in-memory index, and reports corpus statistics. The `search` command builds the same index for a query and returns ranked line-aware results. The index is not persisted yet.
 
 ## Requirements
 
@@ -96,6 +98,7 @@ main/
     |-- index.rs
     |-- main.rs
     |-- scanner.rs
+    |-- search.rs
     `-- tokenizer.rs
 ```
 
@@ -105,7 +108,7 @@ The application entry point. It parses command-line arguments, dispatches the se
 
 ### `src/cli.rs`
 
-Defines the command-line interface with `clap`. The current command is `index`. Future commands will include `search`, `symbol`, `overview`, `related`, `audit-docs`, `stats`, and `clear`.
+Defines the `index` and `search` command-line interfaces with `clap`. Future commands will include `symbol`, `overview`, `related`, `audit-docs`, `stats`, and `clear`.
 
 ### `src/classifier.rs`
 
@@ -117,11 +120,15 @@ Assigns stable document IDs, builds deterministic term-to-posting mappings, stor
 
 ### `src/scanner.rs`
 
-Validates the repository root, prunes ignored directories, walks supported files, reads UTF-8 content, invokes the tokenizer, and records absolute and relative paths.
+Validates the repository root, prunes ignored directories, walks supported files, reads and retains UTF-8 content, invokes the tokenizer, and records absolute and relative paths.
+
+### `src/search.rs`
+
+Normalizes raw queries, groups identifier variants by source query token, merges posting lists with OR or AND semantics, ranks documents by summed term frequency, resolves deterministic ties by path, and selects source lines for snippets.
 
 ### `src/tokenizer.rs`
 
-Normalizes text into lowercase alphanumeric terms. The same tokenizer will be used for indexed content and search queries so matching rules remain consistent.
+Normalizes text into lowercase alphanumeric terms. Indexed content and search queries use the same tokenizer so matching rules remain consistent.
 
 ## Building
 
@@ -153,6 +160,7 @@ Display help:
 cargo run
 cargo run -- --help
 cargo run -- index --help
+cargo run -- search --help
 ```
 
 Scan the current repository:
@@ -165,6 +173,18 @@ Scan another repository:
 
 ```powershell
 cargo run -- index "D:\Career\another-project"
+```
+
+Search the current repository with default OR matching:
+
+```powershell
+cargo run -- search "inverted postings"
+```
+
+Require every source query token and search another repository:
+
+```powershell
+cargo run -- search "database timeout" --match-all --directory "D:\Career\another-project"
 ```
 
 Run the built executable directly:
@@ -239,6 +259,33 @@ Average document length: 696.12 tokens
 ```
 
 Token counts change as source and documentation evolve.
+
+## Current Search Command
+
+```text
+shun search <QUERY> [--directory <DIRECTORY>] [--match-all]
+```
+
+The command scans and indexes the selected repository in memory for each invocation. The directory defaults to the current directory. Query text uses the same developer-aware normalization as indexed content, including complete technical identifiers and their snake-case, camel-case, acronym, and kebab-case components.
+
+Default OR mode returns a document when any source query token matches. `--match-all` requires every source query token, while normalized variants from one identifier remain alternatives within that token. Results are ordered by summed term frequency, with repository path as the deterministic tie-breaker.
+
+Example:
+
+```powershell
+shun search "inverted postings"
+```
+
+Possible output:
+
+```text
+1. src\index.rs:5 [Source code] (score: 20)
+    * This file builds and owns Shun's in-memory inverted index. It assigns stable
+2. README.md:50 [Documentation] (score: 16)
+    - In-memory inverted index with term and document frequency.
+```
+
+Each result identifies the repository-relative path, one-based source line, file category, current term-frequency score, and trimmed matching line. `No matches found.` is printed when no normalized query term occurs in the index.
 
 ## Supported Files
 
@@ -332,6 +379,7 @@ struct ScannedDocument {
     absolute_path: PathBuf,
     relative_path: PathBuf,
     category: FileCategory,
+    content: String,
     token_count: usize,
     tokens: Vec<Token>,
 }
@@ -365,14 +413,13 @@ struct SearchIndex {
 }
 ```
 
-`token_count` counts original source tokens. `tokens` contains the complete normalized terms and any generated identifier components, so its length may be larger.
+`content` retains the exact UTF-8 text used for tokenization so snippets do not require a second file read. `token_count` counts original source tokens. `tokens` contains the complete normalized terms and any generated identifier components, so its length may be larger.
 
 Each posting represents one term in one document. `term_frequency` counts source-token occurrences, while `positions` and `lines` preserve every occurrence location. `BTreeMap` keeps term iteration deterministic. A term's document frequency equals the number of postings in its posting list and is also stored explicitly for later ranking.
 
 Planned document metadata includes:
 
 - File name and extension.
-- Full content or retrievable content location.
 - File size and line count.
 - Modification time or content hash.
 - Extracted Rust symbols.
@@ -464,17 +511,19 @@ Exact normalized terms can be retrieved directly. Persistent serialization is de
 
 ### Query Processing
 
-Queries will use the same normalization rules as repository content. Initial modes will include:
+Queries use the same normalization rules as repository content. The implemented modes include:
 
 - OR matching by default.
 - Optional AND matching with `--match-all`.
-- Result limits.
-- Category filters.
-- Score display for debugging.
+- Term-frequency score display.
+- Deterministic path tie-breaking.
+- One-line snippets from the earliest matching source line.
+
+Result limits and category filters remain planned CLI improvements.
 
 ### Ranking
 
-The ranking baseline will be BM25. Developer-specific boosts will later reward:
+The current ranking baseline sums matching-term frequency within each document. Milestone 6 will replace this with BM25 and developer-specific boosts for:
 
 - Exact symbol-name matches.
 - File-name matches.
@@ -579,7 +628,7 @@ Status: completed.
 
 ### Milestone 5: Basic Search and Snippets
 
-Status: next.
+Status: completed.
 
 - Add multi-keyword queries.
 - Support OR and AND matching.
@@ -587,6 +636,8 @@ Status: next.
 - Rank initially by term frequency.
 
 ### Milestone 6: BM25 and Grouped Results
+
+Status: next.
 
 - Implement BM25.
 - Add file-name, path, category, and later symbol boosts.
@@ -634,7 +685,7 @@ Check formatting:
 cargo fmt -- --check
 ```
 
-Current tests cover file classification, identifier-aware tokenization, source positions, line tracking, Unicode identifiers, repository scanning, exact term lookup, posting construction, document frequency, and corpus statistics. Future tests will cover queries, BM25, symbol extraction, snippets, reference extraction, and documentation-audit confidence.
+Current tests cover file classification, identifier-aware tokenization, source positions, line tracking, Unicode identifiers, repository scanning and retained content, exact term lookup, posting construction, document frequency, corpus statistics, OR and AND queries, identifier query groups, deterministic term-frequency ranking, and line snippets. Future tests will cover BM25, symbol extraction, reference extraction, and documentation-audit confidence.
 
 A normal local verification sequence is:
 
