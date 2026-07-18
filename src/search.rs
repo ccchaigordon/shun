@@ -54,6 +54,48 @@ pub(crate) struct SearchResult {
     pub(crate) line: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct SearchFilters {
+    pub(crate) categories: BTreeSet<FileCategory>,
+    pub(crate) path_contains: Option<String>,
+    pub(crate) extensions: BTreeSet<String>,
+    pub(crate) limit: Option<usize>,
+}
+
+impl SearchFilters {
+    pub(crate) fn new(
+        categories: impl IntoIterator<Item = FileCategory>,
+        path_contains: Option<String>,
+        extensions: impl IntoIterator<Item = String>,
+        limit: Option<usize>,
+    ) -> Self {
+        Self {
+            categories: categories.into_iter().collect(),
+            path_contains: path_contains
+                .map(|path| path.trim().to_lowercase())
+                .filter(|path| !path.is_empty()),
+            extensions: extensions
+                .into_iter()
+                .map(|extension| {
+                    extension
+                        .trim()
+                        .trim_start_matches('.')
+                        .to_ascii_lowercase()
+                })
+                .filter(|extension| !extension.is_empty())
+                .collect(),
+            limit,
+        }
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        !self.categories.is_empty()
+            || self.path_contains.is_some()
+            || !self.extensions.is_empty()
+            || self.limit.is_some()
+    }
+}
+
 #[derive(Debug, Default)]
 struct ResultBuilder {
     term_frequencies: BTreeMap<String, usize>,
@@ -111,6 +153,38 @@ pub(crate) fn search(index: &SearchIndex, query: &str, mode: MatchMode) -> Vec<S
 
     results.sort_by(|left, right| compare_results(index, left, right));
     results
+}
+
+pub(crate) fn filter_results(
+    index: &SearchIndex,
+    results: Vec<SearchResult>,
+    filters: &SearchFilters,
+) -> Vec<SearchResult> {
+    results
+        .into_iter()
+        .filter(|result| {
+            let document = &index.documents[result.document_id];
+            let category_matches =
+                filters.categories.is_empty() || filters.categories.contains(&document.category);
+            let path_matches = filters.path_contains.as_ref().is_none_or(|expected| {
+                document
+                    .relative_path
+                    .to_string_lossy()
+                    .to_lowercase()
+                    .contains(expected)
+            });
+            let extension_matches = filters.extensions.is_empty()
+                || document
+                    .relative_path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .is_some_and(|extension| filters.extensions.contains(&extension));
+
+            category_matches && path_matches && extension_matches
+        })
+        .take(filters.limit.unwrap_or(usize::MAX))
+        .collect()
 }
 
 fn score_factors(
@@ -353,6 +427,34 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!((results[0].score_factors.bm25 - 2.0_f64.ln()).abs() < 1e-12);
         assert!((results[0].score - (2.0_f64.ln() + 0.30)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn filters_ranked_results_by_metadata_and_limit() {
+        let mut documents = vec![
+            scanned_document("docs/guide.md", "search search"),
+            scanned_document("docs/notes.txt", "search"),
+            scanned_document("src/main.rs", "search search search"),
+        ];
+        documents[0].category = FileCategory::Documentation;
+        documents[1].category = FileCategory::Documentation;
+        let index = SearchIndex::build(&documents);
+        let results = search(&index, "search", MatchMode::Any);
+        let filters = SearchFilters::new(
+            [FileCategory::Documentation],
+            Some("DOCS".to_owned()),
+            [".MD".to_owned()],
+            Some(1),
+        );
+
+        let filtered = filter_results(&index, results, &filters);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].document_id, 0);
+        assert_eq!(filters.path_contains.as_deref(), Some("docs"));
+        assert_eq!(filters.extensions, ["md".to_owned()].into_iter().collect());
+        assert!(filters.is_active());
+        assert!(!SearchFilters::default().is_active());
     }
 
     /// This verifies empty-query handling and one-based trimmed snippet extraction.

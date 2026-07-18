@@ -20,6 +20,8 @@ mod search;
 mod terminal;
 mod tokenizer;
 
+use std::env;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -29,15 +31,27 @@ use clap::{CommandFactory, Parser};
 use crate::cli::{Cli, Command};
 use crate::index::SearchIndex;
 use crate::scanner::{ScannedDocument, scan_documents};
-use crate::search::{MatchMode, search};
-use crate::terminal::{color_enabled, render_index, render_search, render_startup};
+use crate::search::{MatchMode, SearchFilters, filter_results, search};
+use crate::terminal::{
+    SearchReport, color_enabled, render_command_help, render_index, render_search, render_startup,
+};
+
+enum HelpTarget {
+    Root,
+    Subcommand(String),
+}
 
 /// This starts Shun, runs the selected command, prints its result.
 /// Parameters: none
 /// Returns: Ok(()) when the command completes successfully or an error when command execution fails.
 fn main() -> Result<()> {
-    let cli: Cli = Cli::parse();
     let color = color_enabled();
+    let arguments = env::args_os().skip(1).collect::<Vec<_>>();
+    if let Some(help) = requested_help(&arguments, color) {
+        write_output(&help)?;
+        return Ok(());
+    }
+    let cli: Cli = Cli::parse();
 
     match cli.command {
         Some(Command::Index { directory }) => {
@@ -50,6 +64,10 @@ fn main() -> Result<()> {
             query,
             directory,
             match_all,
+            categories,
+            path_filter,
+            extensions,
+            limit,
         }) => {
             let scanned_documents: Vec<ScannedDocument> = scan_documents(&directory)?;
             let index = SearchIndex::build(&scanned_documents);
@@ -58,27 +76,74 @@ fn main() -> Result<()> {
             } else {
                 MatchMode::Any
             };
-            let results = search(&index, &query, mode);
+            let filters = SearchFilters::new(
+                categories.into_iter().map(Into::into),
+                path_filter,
+                extensions,
+                limit,
+            );
+            let results = filter_results(&index, search(&index, &query, mode), &filters);
             let report_directory = report_directory(&directory)?;
             write_output(&render_search(
-                &report_directory,
-                &query,
-                mode,
-                &index,
-                &scanned_documents,
-                &results,
+                SearchReport {
+                    directory: &report_directory,
+                    query: &query,
+                    mode,
+                    index: &index,
+                    scanned_documents: &scanned_documents,
+                    results: &results,
+                    filters: &filters,
+                },
                 color,
             ))?;
         }
         None => {
-            let mut help = Vec::new();
-            Cli::command().write_help(&mut help)?;
-            let help = String::from_utf8(help)?;
-            write_output(&render_startup(&help, color))?;
+            write_output(&render_startup(&Cli::command(), color))?;
         }
     }
 
     Ok(())
+}
+
+fn requested_help(arguments: &[OsString], color: bool) -> Option<String> {
+    let target = requested_help_target(arguments)?;
+    let mut command = Cli::command();
+    command.build();
+
+    match target {
+        HelpTarget::Root => Some(render_startup(&command, color)),
+        HelpTarget::Subcommand(name) => command
+            .find_subcommand(&name)
+            .map(|subcommand| render_command_help(subcommand, color)),
+    }
+}
+
+fn requested_help_target(arguments: &[OsString]) -> Option<HelpTarget> {
+    if arguments
+        .first()
+        .is_some_and(|value| value == OsStr::new("help"))
+    {
+        return Some(
+            arguments
+                .get(1)
+                .and_then(|value| value.to_str())
+                .map(|name| HelpTarget::Subcommand(name.to_owned()))
+                .unwrap_or(HelpTarget::Root),
+        );
+    }
+
+    arguments
+        .iter()
+        .take_while(|value| *value != OsStr::new("--"))
+        .any(|value| value == OsStr::new("--help") || value == OsStr::new("-h"))
+        .then(|| {
+            arguments
+                .first()
+                .and_then(|value| value.to_str())
+                .filter(|value| !value.starts_with('-'))
+                .map(|name| HelpTarget::Subcommand(name.to_owned()))
+                .unwrap_or(HelpTarget::Root)
+        })
 }
 
 /// This writes one complete rendered report to standard output.
@@ -111,5 +176,29 @@ mod tests {
             PathBuf::from("another-project")
         );
         Ok(())
+    }
+
+    #[test]
+    fn detects_root_and_subcommand_help_requests() {
+        assert!(matches!(
+            requested_help_target(&[OsString::from("--help")]),
+            Some(HelpTarget::Root)
+        ));
+        assert!(matches!(
+            requested_help_target(&[OsString::from("search"), OsString::from("-h")]),
+            Some(HelpTarget::Subcommand(name)) if name == "search"
+        ));
+        assert!(matches!(
+            requested_help_target(&[OsString::from("help"), OsString::from("index")]),
+            Some(HelpTarget::Subcommand(name)) if name == "index"
+        ));
+        assert!(
+            requested_help_target(&[
+                OsString::from("search"),
+                OsString::from("--"),
+                OsString::from("--help")
+            ])
+            .is_none()
+        );
     }
 }
