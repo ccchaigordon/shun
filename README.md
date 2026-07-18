@@ -79,7 +79,7 @@ cargo run -- search "search index" --match-all
 From the crate directory:
 
 ```powershell
-cd D:\Career\rust-cli-document-search-engine\main
+cd C:\example-folder
 cargo build
 ```
 
@@ -129,7 +129,7 @@ cargo run -- index .
 Scan another repository:
 
 ```powershell
-cargo run -- index "D:\Career\another-project"
+cargo run -- index "C:\another-folder"
 ```
 
 Search the current repository with default OR matching:
@@ -141,7 +141,7 @@ cargo run -- search "inverted postings"
 Require every source query token and search another repository:
 
 ```powershell
-cargo run -- search "database timeout" --match-all --directory "D:\Career\another-project"
+cargo run -- search "database timeout" --match-all --directory "C:\another-folder"
 ```
 
 Run the built executable directly:
@@ -190,7 +190,7 @@ Possible output:
 
 ```text
 INDEX
-Repository  D:\Career\example-folder
+Repository  C:\example-folder
 ------------------------------------------------------------
     ID  PATH               CATEGORY          TOKENS
 ------------------------------------------------------------
@@ -237,7 +237,7 @@ Possible output:
 SEARCH
 Query       "inverted postings"
 Match       ANY term (OR)
-Repository  D:\Career\example-folder
+Repository  C:\example-folder
 ------------------------------------------------------------
 
 +---------------------------------------------------------------------------------+
