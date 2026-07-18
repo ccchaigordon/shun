@@ -48,14 +48,18 @@ Status: completed.
 
 ## Milestone 6: BM25 and Grouped Results
 
-Status: next.
+Status: completed.
 
 - Implement BM25
-- Add file-name, path, category, and later symbol boosts
+- Add file-name, path, and category boosts
 - Group results by repository role
 - Report score factors
+- Filter results by category, extension, path, and result count
+- Defer exact symbol boosts until symbols are indexed
 
 ## Milestone 7: Rust Symbols and Overview
+
+Status: next.
 
 - Parse Rust source with `syn`
 - Add symbol lookup

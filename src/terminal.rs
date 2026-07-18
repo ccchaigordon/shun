@@ -14,6 +14,7 @@ use std::env;
 use std::io::{self, IsTerminal};
 use std::path::Path;
 
+use clap::{Arg, Command as ClapCommand};
 use term_table::row::Row;
 use term_table::table_cell::{Alignment, TableCell};
 use term_table::{Table, TableStyle};
@@ -22,7 +23,7 @@ use textwrap::Options;
 use crate::classifier::FileCategory;
 use crate::index::SearchIndex;
 use crate::scanner::ScannedDocument;
-use crate::search::{MatchMode, SearchResult, snippet_for};
+use crate::search::{MatchMode, SearchFilters, SearchResult, snippet_for};
 use crate::tokenizer::tokenize;
 
 const BANNER: &str = r" __ _
@@ -53,20 +54,142 @@ pub(crate) fn color_enabled() -> bool {
     )
 }
 
-/// This renders Shun's startup identity above generated command help.
-/// Parameters: help is Clap-generated text and color controls ANSI styling.
+/// This renders the startup identity above table-based root command help.
+/// Parameters: command contains Clap metadata and color controls ANSI styling.
 /// Returns: A complete startup screen ending in one newline.
-pub(crate) fn render_startup(help: &str, color: bool) -> String {
+pub(crate) fn render_startup(command: &ClapCommand, color: bool) -> String {
+    render_help(command, true, color)
+}
+
+/// This renders one subcommand's usage, arguments, and options as tables.
+/// Parameters: command contains Clap metadata and color controls ANSI styling.
+/// Returns: A complete help screen ending in one newline.
+pub(crate) fn render_command_help(command: &ClapCommand, color: bool) -> String {
+    render_help(command, false, color)
+}
+
+fn render_help(command: &ClapCommand, show_banner: bool, color: bool) -> String {
+    let mut command = command.clone();
+    command.build();
     let mut output = String::new();
-    output.push_str(&paint(BANNER, BOLD_CYAN, color));
-    output.push_str("\n\n");
-    output.push_str(&paint("Search code and documentation.", DIM, color));
+
+    if show_banner {
+        output.push_str(&paint(BANNER, BOLD_CYAN, color));
+        output.push_str("\n\n");
+        output.push_str(&paint("Search code and documentation.", DIM, color));
+        output.push('\n');
+        output.push_str(&paint(SEPARATOR, DIM, color));
+        output.push('\n');
+    }
+
+    if let Some(about) = command.get_about() {
+        output.push_str(&about.to_string());
+        output.push_str("\n\n");
+    }
+    output.push_str(&command.render_usage().to_string());
     output.push('\n');
-    output.push_str(&paint(SEPARATOR, DIM, color));
-    output.push('\n');
-    output.push_str(help.trim_end());
-    output.push('\n');
+
+    let commands = command
+        .get_subcommands()
+        .map(|subcommand| {
+            (
+                subcommand.get_name().to_owned(),
+                subcommand
+                    .get_about()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let arguments = command
+        .get_arguments()
+        .filter(|argument| argument.is_positional())
+        .map(help_entry_for_argument)
+        .collect::<Vec<_>>();
+    let options = command
+        .get_arguments()
+        .filter(|argument| !argument.is_positional())
+        .map(help_entry_for_argument)
+        .collect::<Vec<_>>();
+
+    for (title, entries) in [
+        ("COMMANDS", commands),
+        ("ARGUMENTS", arguments),
+        ("OPTIONS", options),
+    ] {
+        if !entries.is_empty() {
+            output.push('\n');
+            output.push_str(&render_help_table(title, &entries, color));
+        }
+    }
+
     output
+}
+
+fn help_entry_for_argument(argument: &Arg) -> (String, String) {
+    let label = if argument.is_positional() {
+        argument_value_label(argument)
+    } else {
+        let mut names = Vec::new();
+        if let Some(short) = argument.get_short() {
+            names.push(format!("-{short}"));
+        }
+        if let Some(long) = argument.get_long() {
+            names.push(format!("--{long}"));
+        }
+        let mut label = names.join(", ");
+        if argument.get_action().takes_values() {
+            label.push(' ');
+            label.push_str(&argument_value_label(argument));
+        }
+        label
+    };
+    let mut description = argument
+        .get_long_help()
+        .or_else(|| argument.get_help())
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    let defaults = argument
+        .get_default_values()
+        .iter()
+        .map(|value| value.to_string_lossy())
+        .collect::<Vec<_>>();
+    if !defaults.is_empty() && defaults != ["false"] {
+        description.push_str(&format!(" [default: {}]", defaults.join(", ")));
+    }
+
+    (label, description)
+}
+
+fn argument_value_label(argument: &Arg) -> String {
+    let value_name = argument
+        .get_value_names()
+        .and_then(|names| names.first())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| argument.get_id().as_str().to_ascii_uppercase());
+    format!("<{value_name}>")
+}
+
+fn render_help_table(title: &str, entries: &[(String, String)], color: bool) -> String {
+    let mut rows = vec![Row::new(vec![
+        TableCell::builder(paint(title, BOLD_CYAN, color))
+            .col_span(2)
+            .alignment(Alignment::Center)
+            .build(),
+    ])];
+    rows.extend(entries.iter().map(|(label, description)| {
+        Row::new(vec![
+            TableCell::builder(paint(label, CYAN, color)).build(),
+            TableCell::builder(textwrap::fill(description, Options::new(38))).build(),
+        ])
+    }));
+
+    Table::builder()
+        .max_column_width(40)
+        .style(TableStyle::simple())
+        .rows(rows)
+        .build()
+        .render()
 }
 
 /// This renders indexed documents and corpus statistics as an aligned terminal report.
@@ -180,18 +303,29 @@ pub(crate) fn render_index(directory: &Path, index: &SearchIndex, color: bool) -
 }
 
 /// This renders query context, ranked matches, and line-aware snippets.
-/// Parameters: directory and query identify the request, mode describes OR or AND behavior,
-/// index and scanned_documents resolve result metadata, results are ranked, and color controls ANSI.
+/// Parameters: report contains the request, index, ranked results, and filters,
+/// while color controls ANSI styling.
 /// Returns: A complete report ending in one newline.
-pub(crate) fn render_search(
-    directory: &Path,
-    query: &str,
-    mode: MatchMode,
-    index: &SearchIndex,
-    scanned_documents: &[ScannedDocument],
-    results: &[SearchResult],
-    color: bool,
-) -> String {
+pub(crate) struct SearchReport<'a> {
+    pub(crate) directory: &'a Path,
+    pub(crate) query: &'a str,
+    pub(crate) mode: MatchMode,
+    pub(crate) index: &'a SearchIndex,
+    pub(crate) scanned_documents: &'a [ScannedDocument],
+    pub(crate) results: &'a [SearchResult],
+    pub(crate) filters: &'a SearchFilters,
+}
+
+pub(crate) fn render_search(report: SearchReport<'_>, color: bool) -> String {
+    let SearchReport {
+        directory,
+        query,
+        mode,
+        index,
+        scanned_documents,
+        results,
+        filters,
+    } = report;
     let mut output = String::new();
     push_heading(&mut output, "SEARCH", color);
     output.push_str("Query       ");
@@ -207,6 +341,7 @@ pub(crate) fn render_search(
         color,
     ));
     output.push('\n');
+    push_search_filters(&mut output, filters, color);
     output.push_str("Repository  ");
     output.push_str(&paint(&directory.display().to_string(), CYAN, color));
     output.push('\n');
@@ -226,11 +361,20 @@ pub(crate) fn render_search(
     }
 
     if results.is_empty() {
-        output.push_str(&paint("No matches found.", YELLOW, color));
+        let message = if filters.is_active() {
+            "No matches satisfy the active filters."
+        } else {
+            "No matches found."
+        };
+        output.push_str(&paint(message, YELLOW, color));
         output.push('\n');
-        let hint = match mode {
-            MatchMode::Any => "Check the spelling or try a broader technical term.",
-            MatchMode::All => "Try fewer terms or omit --match-all.",
+        let hint = if filters.is_active() {
+            "Adjust or remove a filter and try again."
+        } else {
+            match mode {
+                MatchMode::Any => "Check the spelling or try a broader technical term.",
+                MatchMode::All => "Try fewer terms or omit --match-all.",
+            }
         };
         output.push_str(&paint(hint, DIM, color));
         output.push('\n');
@@ -247,7 +391,42 @@ pub(crate) fn render_search(
     output
 }
 
-/// This renders ranked matches as a bordered table with wrapped detail rows.
+fn push_search_filters(output: &mut String, filters: &SearchFilters, color: bool) {
+    if !filters.categories.is_empty() {
+        let categories = filters
+            .categories
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        output.push_str("Categories  ");
+        output.push_str(&paint(&categories, YELLOW, color));
+        output.push('\n');
+    }
+    if let Some(path) = &filters.path_contains {
+        output.push_str("Path        ");
+        output.push_str(&paint(path, CYAN, color));
+        output.push('\n');
+    }
+    if !filters.extensions.is_empty() {
+        let extensions = filters
+            .extensions
+            .iter()
+            .map(|extension| format!(".{extension}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        output.push_str("Extensions  ");
+        output.push_str(&paint(&extensions, CYAN, color));
+        output.push('\n');
+    }
+    if let Some(limit) = filters.limit {
+        output.push_str("Limit       ");
+        output.push_str(&paint(&format_count(limit), GREEN, color));
+        output.push('\n');
+    }
+}
+
+/// This renders ranked matches grouped by repository role with scores.
 /// Parameters: index and scanned_documents resolve result metadata, results are ranked,
 /// and color controls ANSI styling within cells.
 /// Returns: A complete ASCII table ending in one newline.
@@ -273,49 +452,85 @@ fn render_search_results_table(
         .build(),
     ])];
 
+    let mut result_ranks = vec![0; index.documents.len()];
     for (rank, result) in results.iter().enumerate() {
-        let document = &index.documents[result.document_id];
-        let scanned_document = &scanned_documents[result.document_id];
-        let snippet = snippet_for(&scanned_document.content, result.line)
-            .expect("posting lines must resolve within scanned content");
+        result_ranks[result.document_id] = rank + 1;
+    }
+
+    for category in FileCategory::ALL {
+        let category_results: Vec<&SearchResult> = results
+            .iter()
+            .filter(|result| index.documents[result.document_id].category == category)
+            .collect();
+        if category_results.is_empty() {
+            continue;
+        }
 
         rows.push(Row::new(vec![
             TableCell::builder(paint(
-                &format!("#{}  {}", rank + 1, document.relative_path.display()),
-                BOLD_CYAN,
+                &format!(
+                    "{} ({})",
+                    result_group_label(category),
+                    format_count(category_results.len())
+                ),
+                YELLOW,
                 color,
             ))
             .col_span(2)
             .alignment(Alignment::Center)
             .build(),
         ]));
-        rows.push(Row::new(vec![
-            TableCell::builder(format!(
-                "Line: {}",
-                paint(&result.line.to_string(), CYAN, color)
-            ))
-            .build(),
-            TableCell::builder(format!(
-                "Category: {}  Score: {}",
-                paint(&document.category.to_string(), YELLOW, color),
-                paint(&format_count(result.score), GREEN, color)
-            ))
-            .alignment(Alignment::Right)
-            .build(),
-        ]));
-        rows.push(Row::without_separator(vec![
-            TableCell::builder(format!(
-                "Matches  {}",
-                paint(&result.matched_terms.join(", "), MAGENTA, color)
-            ))
-            .col_span(2)
-            .build(),
-        ]));
-        rows.push(Row::without_separator(vec![
-            TableCell::builder(format_snippet(snippet))
+
+        for result in category_results {
+            let document = &index.documents[result.document_id];
+            let scanned_document = &scanned_documents[result.document_id];
+            let rank = result_ranks[result.document_id];
+            let snippet = snippet_for(&scanned_document.content, result.line)
+                .expect("posting lines must resolve within scanned content");
+
+            rows.push(Row::new(vec![
+                TableCell::builder(paint(
+                    &format!("#{rank}  {}", document.relative_path.display()),
+                    BOLD_CYAN,
+                    color,
+                ))
+                .col_span(2)
+                .alignment(Alignment::Center)
+                .build(),
+            ]));
+            rows.push(Row::new(vec![
+                TableCell::builder(format!(
+                    "Line: {}",
+                    paint(&result.line.to_string(), CYAN, color)
+                ))
+                .build(),
+                TableCell::builder(format!(
+                    "Category: {}  Score: {}",
+                    paint(&document.category.to_string(), YELLOW, color),
+                    paint(&format_score(result.score), GREEN, color)
+                ))
+                .alignment(Alignment::Right)
+                .build(),
+            ]));
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(format!(
+                    "Matches  {}",
+                    paint(&result.matched_terms.join(", "), MAGENTA, color)
+                ))
                 .col_span(2)
                 .build(),
-        ]));
+            ]));
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(paint(&format_score_factors(result), DIM, color))
+                    .col_span(2)
+                    .build(),
+            ]));
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(format_snippet(snippet))
+                    .col_span(2)
+                    .build(),
+            ]));
+        }
     }
 
     Table::builder()
@@ -324,6 +539,28 @@ fn render_search_results_table(
         .rows(rows)
         .build()
         .render()
+}
+
+fn result_group_label(category: FileCategory) -> &'static str {
+    match category {
+        FileCategory::SourceCode => "IMPLEMENTATION",
+        FileCategory::Documentation => "DOCUMENTATION",
+        FileCategory::Configuration => "CONFIGURATION",
+        FileCategory::Test => "TESTS",
+        FileCategory::Example => "EXAMPLES",
+        FileCategory::ProjectMetadata => "PROJECT METADATA",
+        FileCategory::Unknown => "OTHER",
+    }
+}
+
+fn format_score_factors(result: &SearchResult) -> String {
+    format!(
+        "Factors: BM25 {} + file name {} + path {} + category {}",
+        format_score(result.score_factors.bm25),
+        format_score(result.score_factors.file_name_boost),
+        format_score(result.score_factors.path_boost),
+        format_score(result.score_factors.category_boost)
+    )
 }
 
 fn format_snippet(snippet: &str) -> String {
@@ -378,11 +615,18 @@ fn format_count(value: usize) -> String {
     output
 }
 
+fn format_score(value: f64) -> String {
+    format!("{value:.3}")
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
+    use clap::CommandFactory;
+
     use crate::classifier::FileCategory;
+    use crate::cli::Cli;
     use crate::scanner::ScannedDocument;
     use crate::search::search;
     use crate::tokenizer::tokenize;
@@ -407,13 +651,37 @@ mod tests {
 
     #[test]
     fn renders_plain_startup_banner() {
-        let output = render_startup("Usage: shun <COMMAND>\n", false);
+        let output = render_startup(&Cli::command(), false);
 
         assert!(output.starts_with(BANNER));
         assert!(output.contains("Search code and documentation."));
         assert!(output.contains(SEPARATOR));
-        assert!(output.ends_with("Usage: shun <COMMAND>\n"));
+        assert!(output.contains("Usage: shun [COMMAND]"));
+        assert!(output.contains("COMMANDS"));
+        assert!(output.contains("| index"));
+        assert!(output.contains("| search"));
+        assert!(output.contains("OPTIONS"));
         assert!(!output.contains("\x1b["));
+    }
+
+    #[test]
+    fn renders_subcommand_arguments_and_options_as_tables() {
+        let mut command = Cli::command();
+        command.build();
+        let search_command = command.find_subcommand("search").unwrap();
+
+        let output = render_command_help(search_command, false);
+
+        assert!(output.contains("Usage: shun search [OPTIONS] <QUERY>"));
+        assert!(output.contains("ARGUMENTS"));
+        assert!(output.contains("<QUERY>"));
+        assert!(output.contains("OPTIONS"));
+        assert!(output.contains("--category <CATEGORY>"));
+        assert!(output.contains("source-code"));
+        assert!(output.contains("documentation"));
+        assert!(output.contains("--extension <EXTENSION>"));
+        assert!(output.contains("[default: .]"));
+        assert!(!output.contains("default: false"));
     }
 
     #[test]
@@ -422,7 +690,7 @@ mod tests {
         assert!(!color_enabled_for(false, false, Some("xterm-256color")));
         assert!(!color_enabled_for(true, true, Some("xterm-256color")));
         assert!(!color_enabled_for(true, false, Some("dumb")));
-        assert!(render_startup("help", true).contains("\x1b[1;36m"));
+        assert!(render_startup(&Cli::command(), true).contains("\x1b[1;36m"));
     }
 
     #[test]
@@ -459,38 +727,119 @@ mod tests {
         let results = search(&index, "help", MatchMode::Any);
 
         let output = render_search(
-            Path::new("."),
-            "help",
-            MatchMode::Any,
-            &index,
-            &documents,
-            &results,
+            SearchReport {
+                directory: Path::new("."),
+                query: "help",
+                mode: MatchMode::Any,
+                index: &index,
+                scanned_documents: &documents,
+                results: &results,
+                filters: &SearchFilters::default(),
+            },
             false,
         );
 
         assert!(output.contains("SEARCH\nQuery       \"help\""));
         assert!(output.contains("Match       ANY term (OR)"));
         assert!(output.contains("SEARCH RESULTS (1 match)"));
+        assert!(output.contains("IMPLEMENTATION (1)"));
         assert!(output.contains("+"));
         assert!(output.contains("|"));
         assert!(output.contains("#1  src/cli.rs"));
         assert!(output.contains("Line: 1"));
-        assert!(output.contains("Category: Source code  Score: 1"));
+        assert!(output.contains("Category: Source code  Score: 0."));
         assert!(output.contains("Matches  help"));
+        assert!(output.contains("Factors: BM25 0."));
+        assert!(output.contains("file name 0.000 + path 0.000 + category 0.300"));
         assert!(output.contains("Snippet: * It uses clap"));
         assert!(!output.contains("ch |\n| eck"));
         assert!(output.lines().any(|line| line.contains("check")));
         assert!(output.lines().all(|line| line.chars().count() <= 83));
 
         let punctuation_output = render_search(
-            Path::new("."),
-            "???",
-            MatchMode::Any,
-            &index,
-            &documents,
-            &[],
+            SearchReport {
+                directory: Path::new("."),
+                query: "???",
+                mode: MatchMode::Any,
+                index: &index,
+                scanned_documents: &documents,
+                results: &[],
+                filters: &SearchFilters::default(),
+            },
             false,
         );
         assert!(punctuation_output.contains("No searchable terms in the query."));
+    }
+
+    #[test]
+    fn groups_search_results_by_repository_role() {
+        let mut documents = vec![
+            scanned_document("src/search.rs", "search"),
+            scanned_document("README.md", "search search search search"),
+            scanned_document("config/shun.toml", "search search"),
+        ];
+        documents[1].category = FileCategory::Documentation;
+        documents[2].category = FileCategory::Configuration;
+        let index = SearchIndex::build(&documents);
+        let results = search(&index, "search", MatchMode::Any);
+
+        let output = render_search(
+            SearchReport {
+                directory: Path::new("."),
+                query: "search",
+                mode: MatchMode::Any,
+                index: &index,
+                scanned_documents: &documents,
+                results: &results,
+                filters: &SearchFilters::default(),
+            },
+            false,
+        );
+
+        let implementation = output.find("IMPLEMENTATION (1)").unwrap();
+        let documentation = output.find("DOCUMENTATION (1)").unwrap();
+        let configuration = output.find("CONFIGURATION (1)").unwrap();
+        assert!(implementation < documentation);
+        assert!(documentation < configuration);
+        for document in &index.documents {
+            let rank = results
+                .iter()
+                .position(|result| result.document_id == document.id)
+                .unwrap()
+                + 1;
+            assert!(output.contains(&format!("#{rank}  {}", document.relative_path.display())));
+        }
+    }
+
+    #[test]
+    fn renders_active_filters_and_filter_specific_empty_guidance() {
+        let documents = vec![scanned_document("src/search.rs", "search")];
+        let index = SearchIndex::build(&documents);
+        let filters = SearchFilters::new(
+            [FileCategory::Documentation],
+            Some("DOCS".to_owned()),
+            [".MD".to_owned()],
+            Some(2),
+        );
+
+        let output = render_search(
+            SearchReport {
+                directory: Path::new("."),
+                query: "search",
+                mode: MatchMode::Any,
+                index: &index,
+                scanned_documents: &documents,
+                results: &[],
+                filters: &filters,
+            },
+            false,
+        );
+
+        assert!(output.contains("Categories  Documentation"));
+        assert!(output.contains("Path        docs"));
+        assert!(output.contains("Extensions  .md"));
+        assert!(output.contains("Limit       2"));
+        assert!(output.contains("No matches satisfy the active filters."));
+        assert!(output.contains("Adjust or remove a filter and try again."));
     }
 }
