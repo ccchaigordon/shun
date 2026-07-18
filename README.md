@@ -46,13 +46,17 @@ Implemented:
 - Classification of source, documentation, configuration, tests, examples, and project metadata.
 - Per-file token counts.
 - Per-category file totals.
+- Stable document IDs assigned from deterministic path order.
+- In-memory inverted index with term and document frequency.
+- Position-aware and line-aware posting lists.
+- Exact normalized-term lookup.
+- Total and average document-length statistics.
 - Deterministic path-sorted output.
 - Graceful handling of unreadable descendants.
-- Unit tests for classification, scanning, and tokenization.
+- Unit tests for classification, scanning, tokenization, and indexing.
 
 Not implemented yet:
 
-- Inverted index.
 - Search commands.
 - BM25 ranking.
 - Result grouping and explanations.
@@ -64,7 +68,7 @@ Not implemented yet:
 - Related-file discovery.
 - Documentation consistency auditing.
 
-The current `index` command scans and reports repository files. It does not save an index or provide search yet.
+The current `index` command scans repository files, builds an in-memory index, and reports corpus statistics. It does not save the index or provide search yet.
 
 ## Requirements
 
@@ -89,6 +93,7 @@ main/
 `-- src/
     |-- classifier.rs
     |-- cli.rs
+    |-- index.rs
     |-- main.rs
     |-- scanner.rs
     `-- tokenizer.rs
@@ -105,6 +110,10 @@ Defines the command-line interface with `clap`. The current command is `index`. 
 ### `src/classifier.rs`
 
 Classifies repository-relative paths as source code, documentation, configuration, tests, examples, project metadata, or unknown. Directory roles take precedence over extensions so files under `tests/` and `examples/` are categorized correctly.
+
+### `src/index.rs`
+
+Assigns stable document IDs, builds deterministic term-to-posting mappings, stores term and document frequency, retains token positions and source lines, and calculates corpus-length statistics.
 
 ### `src/scanner.rs`
 
@@ -199,7 +208,10 @@ The command currently performs these steps:
 10. Classify each file by its repository role.
 11. Store absolute paths, relative paths, categories, and token counts.
 12. Sort results by repository-relative path.
-13. Print discovered files and per-category totals.
+13. Assign stable document IDs from the sorted file order.
+14. Build term postings and document-frequency statistics.
+15. Calculate total and average source-document length.
+16. Print discovered files, category totals, and index statistics.
 
 Example:
 
@@ -210,18 +222,20 @@ shun index .
 Possible output:
 
 ```text
-Cargo.toml [Project metadata]: 35 tokens
-README.md [Documentation]: 1450 tokens
-src\classifier.rs [Source code]: 520 tokens
-src\cli.rs [Source code]: 96 tokens
-src\main.rs [Source code]: 174 tokens
-src\scanner.rs [Source code]: 620 tokens
-src\tokenizer.rs [Source code]: 180 tokens
+     0  Cargo.toml [Project metadata]: 22 tokens
+     1  README.md [Documentation]: 2580 tokens
+     2  src\classifier.rs [Source code]: 473 tokens
+     3  src\cli.rs [Source code]: 100 tokens
+     4  src\index.rs [Source code]: 616 tokens
 
-Indexed 7 files.
-    Source code: 5
+Indexed 8 files.
+    Source code: 6
     Documentation: 1
     Project metadata: 1
+Unique terms: 1218
+Posting entries: 2090
+Total source tokens: 5569
+Average document length: 696.12 tokens
 ```
 
 Token counts change as source and documentation evolve.
@@ -327,13 +341,36 @@ struct Token {
     position: usize,
     line: usize,
 }
+
+struct IndexedDocument {
+    id: DocumentId,
+    relative_path: PathBuf,
+    category: FileCategory,
+    token_count: usize,
+}
+
+struct Posting {
+    document_id: DocumentId,
+    term_frequency: usize,
+    positions: Vec<usize>,
+    lines: Vec<usize>,
+}
+
+struct SearchIndex {
+    documents: Vec<IndexedDocument>,
+    postings: BTreeMap<String, Vec<Posting>>,
+    document_frequency: BTreeMap<String, usize>,
+    total_token_count: usize,
+    average_document_length: f64,
+}
 ```
 
 `token_count` counts original source tokens. `tokens` contains the complete normalized terms and any generated identifier components, so its length may be larger.
 
+Each posting represents one term in one document. `term_frequency` counts source-token occurrences, while `positions` and `lines` preserve every occurrence location. `BTreeMap` keeps term iteration deterministic. A term's document frequency equals the number of postings in its posting list and is also stored explicitly for later ranking.
+
 Planned document metadata includes:
 
-- Stable document ID.
 - File name and extension.
 - Full content or retrievable content location.
 - File size and line count.
@@ -407,12 +444,12 @@ Classification will use extension, file name, directory name, and simple reposit
 
 ### Inverted Index
 
-The index will map normalized terms to postings:
+The implemented in-memory index maps normalized terms to postings:
 
 ```rust
 type DocumentId = usize;
 
-type InvertedIndex = HashMap<String, Vec<Posting>>;
+type InvertedIndex = BTreeMap<String, Vec<Posting>>;
 
 struct Posting {
     document_id: DocumentId,
@@ -423,6 +460,7 @@ struct Posting {
 ```
 
 Positions support future phrase matching. Line numbers support code-aware snippets and terminal navigation.
+Exact normalized terms can be retrieved directly. Persistent serialization is deferred to the persistence milestone.
 
 ### Query Processing
 
@@ -532,7 +570,7 @@ Status: completed.
 
 ### Milestone 4: Inverted Index
 
-Status: next.
+Status: completed.
 
 - Assign document IDs.
 - Store term and document frequency.
@@ -540,6 +578,8 @@ Status: next.
 - Support exact term lookup.
 
 ### Milestone 5: Basic Search and Snippets
+
+Status: next.
 
 - Add multi-keyword queries.
 - Support OR and AND matching.
@@ -594,7 +634,7 @@ Check formatting:
 cargo fmt -- --check
 ```
 
-Current tests cover file classification, identifier-aware tokenization, source positions, line tracking, Unicode identifiers, and repository scanning. Future tests will cover postings, BM25, symbol extraction, snippets, reference extraction, and documentation-audit confidence.
+Current tests cover file classification, identifier-aware tokenization, source positions, line tracking, Unicode identifiers, repository scanning, exact term lookup, posting construction, document frequency, and corpus statistics. Future tests will cover queries, BM25, symbol extraction, snippets, reference extraction, and documentation-audit confidence.
 
 A normal local verification sequence is:
 
