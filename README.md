@@ -41,14 +41,15 @@ Implemented:
 - UTF-8 text reading.
 - Lowercase Unicode-aware alphanumeric tokenization.
 - Absolute and repository-relative path metadata.
+- Classification of source, documentation, configuration, tests, examples, and project metadata.
 - Per-file token counts.
+- Per-category file totals.
 - Deterministic path-sorted output.
 - Graceful handling of unreadable descendants.
-- Unit tests for scanning and tokenization.
+- Unit tests for classification, scanning, and tokenization.
 
 Not implemented yet:
 
-- File classification.
 - Developer-aware identifier splitting.
 - Token positions and line tracking.
 - Inverted index.
@@ -86,6 +87,7 @@ main/
 |-- Cargo.lock
 |-- README.md
 `-- src/
+    |-- classifier.rs
     |-- cli.rs
     |-- main.rs
     |-- scanner.rs
@@ -99,6 +101,10 @@ The application entry point. It parses command-line arguments, dispatches the se
 ### `src/cli.rs`
 
 Defines the command-line interface with `clap`. The current command is `index`. Future commands will include `search`, `symbol`, `overview`, `related`, `audit-docs`, `stats`, and `clear`.
+
+### `src/classifier.rs`
+
+Classifies repository-relative paths as source code, documentation, configuration, tests, examples, project metadata, or unknown. Directory roles take precedence over extensions so files under `tests/` and `examples/` are categorized correctly.
 
 ### `src/scanner.rs`
 
@@ -190,9 +196,10 @@ The command currently performs these steps:
 7. Read supported files as UTF-8 text.
 8. Skip unreadable or invalid UTF-8 descendants.
 9. Tokenize readable content.
-10. Store absolute paths, relative paths, and token counts.
-11. Sort results by repository-relative path.
-12. Print the discovered files and total count.
+10. Classify each file by its repository role.
+11. Store absolute paths, relative paths, categories, and token counts.
+12. Sort results by repository-relative path.
+13. Print discovered files and per-category totals.
 
 Example:
 
@@ -203,13 +210,18 @@ shun index .
 Possible output:
 
 ```text
-Cargo.toml: 35 tokens
-README.md: 1450 tokens
-src\cli.rs: 96 tokens
-src\main.rs: 174 tokens
-src\scanner.rs: 620 tokens
-src\tokenizer.rs: 180 tokens
-Indexed 6 documents.
+Cargo.toml [Project metadata]: 35 tokens
+README.md [Documentation]: 1450 tokens
+src\classifier.rs [Source code]: 520 tokens
+src\cli.rs [Source code]: 96 tokens
+src\main.rs [Source code]: 174 tokens
+src\scanner.rs [Source code]: 620 tokens
+src\tokenizer.rs [Source code]: 180 tokens
+
+Indexed 7 files.
+    Source code: 5
+    Documentation: 1
+    Project metadata: 1
 ```
 
 Token counts change as source and documentation evolve.
@@ -300,6 +312,7 @@ The scanner currently records:
 struct ScannedDocument {
     absolute_path: PathBuf,
     relative_path: PathBuf,
+    category: FileCategory,
     token_count: usize,
 }
 ```
@@ -308,7 +321,6 @@ Planned document metadata includes:
 
 - Stable document ID.
 - File name and extension.
-- File category.
 - Full content or retrievable content location.
 - File size and line count.
 - Modification time or content hash.
@@ -491,13 +503,15 @@ Status: completed for the initial formats and built-in exclusions.
 
 ### Milestone 2: File Classification
 
-Status: next.
+Status: completed.
 
 - Add `FileCategory`.
 - Classify source, documentation, configuration, tests, examples, and metadata.
 - Display category counts.
 
 ### Milestone 3: Developer-Aware Tokenization
+
+Status: next.
 
 - Preserve complete identifiers.
 - Split snake case, camel case, and kebab case.
@@ -565,7 +579,7 @@ Check formatting:
 cargo fmt -- --check
 ```
 
-Current tests cover baseline tokenization and repository scanning. Future tests will cover classification, identifier splitting, postings, BM25, symbol extraction, snippets, reference extraction, and documentation-audit confidence.
+Current tests cover file classification, baseline tokenization, and repository scanning. Future tests will cover identifier splitting, postings, BM25, symbol extraction, snippets, reference extraction, and documentation-audit confidence.
 
 A normal local verification sequence is:
 

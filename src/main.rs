@@ -12,6 +12,7 @@
  * ============================================================================
  */
 
+mod classifier;
 mod cli;
 mod scanner;
 mod tokenizer;
@@ -19,6 +20,7 @@ mod tokenizer;
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
 
+use crate::classifier::FileCategory;
 use crate::cli::{Cli, Command};
 use crate::scanner::{ScannedDocument, scan_documents};
 
@@ -35,13 +37,24 @@ fn main() -> Result<()> {
 
             for document in &documents {
                 println!(
-                    "{}: {} tokens",
+                    "{} [{}]: {} tokens",
                     document.relative_path.display(),
+                    document.category,
                     document.token_count
                 );
             }
 
-            println!("Indexed {} documents.", documents.len());
+            println!("\nIndexed {} files.", documents.len());
+            for category in FileCategory::ALL {
+                let count = documents
+                    .iter()
+                    .filter(|document| document.category == category)
+                    .count();
+
+                if count > 0 {
+                    println!("  {category}: {count}");
+                }
+            }
         }
         None => {
             Cli::command().print_help()?;

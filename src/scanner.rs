@@ -21,12 +21,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use walkdir::WalkDir;
 
+use crate::classifier::{FileCategory, classify_file};
 use crate::tokenizer::tokenize;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ScannedDocument {
     pub(crate) absolute_path: PathBuf,
     pub(crate) relative_path: PathBuf,
+    pub(crate) category: FileCategory,
     pub(crate) token_count: usize,
 }
 
@@ -81,6 +83,7 @@ pub(crate) fn scan_documents(root: &Path) -> Result<Vec<ScannedDocument>> {
 
         documents.push(ScannedDocument {
             absolute_path: entry.path().to_path_buf(),
+            category: classify_file(&relative_path),
             relative_path,
             token_count: tokenize(&content).len(),
         });
@@ -137,13 +140,19 @@ mod tests {
     fn scans_supported_documents_recursively() -> Result<()> {
         let directory = tempfile::tempdir().context("failed to create temporary directory")?;
         let source = directory.path().join("src");
+        let tests = directory.path().join("tests");
+        let examples = directory.path().join("examples");
         let generated = directory.path().join("target");
         fs::create_dir(&source)?;
+        fs::create_dir(&tests)?;
+        fs::create_dir(&examples)?;
         fs::create_dir(&generated)?;
         fs::write(directory.path().join("README.md"), "Rust ownership")?;
         fs::write(directory.path().join("Cargo.toml"), "package name shun")?;
         fs::write(source.join("main.rs"), "fn main search engine")?;
         fs::write(source.join("data.JSON"), "configuration true")?;
+        fs::write(tests.join("scanner_tests.rs"), "test scanner")?;
+        fs::write(examples.join("basic.rs"), "example scanner")?;
         fs::write(source.join("image.png"), "not indexed")?;
         fs::write(generated.join("generated.rs"), "must be ignored")?;
 
@@ -153,14 +162,16 @@ mod tests {
             .map(|document| document.relative_path.as_path())
             .collect();
 
-        assert_eq!(documents.len(), 4);
+        assert_eq!(documents.len(), 6);
         assert_eq!(
             relative_paths,
             vec![
                 Path::new("Cargo.toml"),
                 Path::new("README.md"),
+                Path::new("examples/basic.rs"),
                 Path::new("src/data.JSON"),
                 Path::new("src/main.rs"),
+                Path::new("tests/scanner_tests.rs"),
             ]
         );
         assert!(
@@ -168,7 +179,13 @@ mod tests {
                 .iter()
                 .all(|document| document.absolute_path.is_absolute())
         );
-        assert_eq!(documents[3].token_count, 4);
+        assert_eq!(documents[0].category, FileCategory::ProjectMetadata);
+        assert_eq!(documents[1].category, FileCategory::Documentation);
+        assert_eq!(documents[2].category, FileCategory::Example);
+        assert_eq!(documents[3].category, FileCategory::Configuration);
+        assert_eq!(documents[4].category, FileCategory::SourceCode);
+        assert_eq!(documents[5].category, FileCategory::Test);
+        assert_eq!(documents[4].token_count, 4);
         Ok(())
     }
 }
