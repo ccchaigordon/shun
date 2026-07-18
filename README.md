@@ -10,7 +10,7 @@ The goal is broader than finding files that contain a keyword. Shun is intended 
 - Which implementation and documentation files relate to the same feature?
 - Does the documentation mention paths, commands, options, or symbols that no longer exist?
 
-Shun is developed incrementally. The repository scanner and baseline tokenizer exist today. Search, ranking, symbol extraction, relationship discovery, and documentation auditing remain planned work.
+Shun is developed incrementally. Repository scanning, file classification, and developer-aware tokenization exist today. Search, ranking, symbol extraction, relationship discovery, and documentation auditing remain planned work.
 
 ## Project Positioning
 
@@ -39,7 +39,9 @@ Implemented:
 - Case-insensitive extension matching.
 - Exclusion of common generated, dependency, and editor directories.
 - UTF-8 text reading.
-- Lowercase Unicode-aware alphanumeric tokenization.
+- Lowercase Unicode-aware tokenization for prose and technical identifiers.
+- Preservation and splitting of snake-case, camel-case, acronym, and kebab-case identifiers.
+- Zero-based source positions and one-based line numbers for every searchable term.
 - Absolute and repository-relative path metadata.
 - Classification of source, documentation, configuration, tests, examples, and project metadata.
 - Per-file token counts.
@@ -50,8 +52,6 @@ Implemented:
 
 Not implemented yet:
 
-- Developer-aware identifier splitting.
-- Token positions and line tracking.
 - Inverted index.
 - Search commands.
 - BM25 ranking.
@@ -262,13 +262,17 @@ Planned improvements include `.gitignore`-aware traversal, configurable exclusio
 
 ## Tokenization
 
-The baseline tokenizer:
+The developer-aware tokenizer:
 
 - Keeps Unicode letters and numbers.
-- Treats punctuation and whitespace as separators.
+- Keeps underscores and internal hyphens in complete technical identifiers.
+- Treats other punctuation and whitespace as separators.
 - Removes empty terms.
-- Converts terms to lowercase.
-- Preserves term order.
+- Converts complete identifiers and components to lowercase.
+- Preserves complete snake-case and kebab-case identifiers.
+- Splits snake case, camel case, acronym boundaries, and kebab case.
+- Deduplicates variants generated from the same source token.
+- Records a zero-based source position and one-based line for every variant.
 
 Example input:
 
@@ -280,14 +284,13 @@ Current output:
 
 ```text
 rust
+search-engine_v2
 search
 engine
 v2
 ```
 
-The current rules are suitable for basic prose but not sufficient for developer-focused search. The next tokenizer version will preserve complete technical identifiers and add useful variants.
-
-Planned examples:
+For example:
 
 ```text
 build_search_index
@@ -304,6 +307,8 @@ index
 
 Similarly, `SearchIndexBuilder` will produce the complete normalized identifier plus `search`, `index`, and `builder`.
 
+All variants from one source identifier share a position. This allows `build_search_index` to remain one source token for document-length calculations while exposing four searchable terms. These source positions will support phrase matching, and line numbers will support code-aware snippets.
+
 ## Current Data Model
 
 The scanner currently records:
@@ -314,8 +319,17 @@ struct ScannedDocument {
     relative_path: PathBuf,
     category: FileCategory,
     token_count: usize,
+    tokens: Vec<Token>,
+}
+
+struct Token {
+    term: String,
+    position: usize,
+    line: usize,
 }
 ```
+
+`token_count` counts original source tokens. `tokens` contains the complete normalized terms and any generated identifier components, so its length may be larger.
 
 Planned document metadata includes:
 
@@ -324,7 +338,6 @@ Planned document metadata includes:
 - Full content or retrievable content location.
 - File size and line count.
 - Modification time or content hash.
-- Token positions and line numbers.
 - Extracted Rust symbols.
 
 ## Error Handling
@@ -478,8 +491,8 @@ False-positive reduction will prioritize inline code, explicit paths, names endi
 
 ## Planned Commands
 
-| Command                   | Purpose                                                       | Status                                    |
-| ------------------------- | ------------------------------------------------------------- | ----------------------------------------- |
+| Command               | Purpose                                                       | Status                                    |
+| --------------------- | ------------------------------------------------------------- | ----------------------------------------- |
 | `shun index <path>`   | Scan and eventually persist a repository index.               | Scanner implemented; persistence planned. |
 | `shun search <query>` | Search indexed repository knowledge.                          | Planned.                                  |
 | `shun symbol <name>`  | Find a Rust symbol definition and likely references.          | Planned.                                  |
@@ -511,13 +524,15 @@ Status: completed.
 
 ### Milestone 3: Developer-Aware Tokenization
 
-Status: next.
+Status: completed.
 
 - Preserve complete identifiers.
 - Split snake case, camel case, and kebab case.
 - Track term positions and source lines.
 
 ### Milestone 4: Inverted Index
+
+Status: next.
 
 - Assign document IDs.
 - Store term and document frequency.
@@ -579,7 +594,7 @@ Check formatting:
 cargo fmt -- --check
 ```
 
-Current tests cover file classification, baseline tokenization, and repository scanning. Future tests will cover identifier splitting, postings, BM25, symbol extraction, snippets, reference extraction, and documentation-audit confidence.
+Current tests cover file classification, identifier-aware tokenization, source positions, line tracking, Unicode identifiers, and repository scanning. Future tests will cover postings, BM25, symbol extraction, snippets, reference extraction, and documentation-audit confidence.
 
 A normal local verification sequence is:
 

@@ -22,7 +22,7 @@ use anyhow::{Context, Result, bail};
 use walkdir::WalkDir;
 
 use crate::classifier::{FileCategory, classify_file};
-use crate::tokenizer::tokenize;
+use crate::tokenizer::{Token, tokenize};
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ScannedDocument {
@@ -30,6 +30,7 @@ pub(crate) struct ScannedDocument {
     pub(crate) relative_path: PathBuf,
     pub(crate) category: FileCategory,
     pub(crate) token_count: usize,
+    pub(crate) tokens: Vec<Token>,
 }
 
 /// This recursively discovers and reads supported documents below a root directory.
@@ -79,12 +80,14 @@ pub(crate) fn scan_documents(root: &Path) -> Result<Vec<ScannedDocument>> {
             .strip_prefix(&absolute_root)
             .expect("walked entries must remain below the scan root")
             .to_path_buf();
+        let tokenized = tokenize(&content);
 
         documents.push(ScannedDocument {
             absolute_path: entry.path().to_path_buf(),
             category: classify_file(&relative_path),
             relative_path,
-            token_count: tokenize(&content).len(),
+            token_count: tokenized.source_token_count,
+            tokens: tokenized.tokens,
         });
     }
 
@@ -96,7 +99,7 @@ pub(crate) fn scan_documents(root: &Path) -> Result<Vec<ScannedDocument>> {
 
 /// This determines whether a path has an extension supported by repository indexing.
 /// Parameters: path is the file-system path whose extension will be inspected.
-/// Returns: true for Rust source, documentation, and initial configuration formats;
+/// Returns: true for Rust source, documentation, and initial configuration formats,
 /// false when the extension is missing, unsupported, or is not valid UTF-8.
 fn is_supported(path: &Path) -> bool {
     path.extension()
@@ -146,7 +149,7 @@ mod tests {
         fs::create_dir(&generated)?;
         fs::write(directory.path().join("README.md"), "Rust ownership")?;
         fs::write(directory.path().join("Cargo.toml"), "package name shun")?;
-        fs::write(source.join("main.rs"), "fn main search engine")?;
+        fs::write(source.join("main.rs"), "fn build_search_index")?;
         fs::write(source.join("data.JSON"), "configuration true")?;
         fs::write(tests.join("scanner_tests.rs"), "test scanner")?;
         fs::write(examples.join("basic.rs"), "example scanner")?;
@@ -182,7 +185,11 @@ mod tests {
         assert_eq!(documents[3].category, FileCategory::Configuration);
         assert_eq!(documents[4].category, FileCategory::SourceCode);
         assert_eq!(documents[5].category, FileCategory::Test);
-        assert_eq!(documents[4].token_count, 4);
+        assert_eq!(documents[4].token_count, 2);
+        assert_eq!(documents[4].tokens.len(), 5);
+        assert_eq!(documents[4].tokens[0].term, "fn");
+        assert_eq!(documents[4].tokens[1].term, "build_search_index");
+        assert_eq!(documents[4].tokens[4].term, "index");
         Ok(())
     }
 }
