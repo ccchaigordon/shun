@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+term-table = "1.4.0"
+textwrap = "0.16.2"
 walkdir = "2"
 
 [dev-dependencies]

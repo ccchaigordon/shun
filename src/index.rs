@@ -136,6 +136,7 @@ mod tests {
             absolute_path: Path::new("/").join(path),
             relative_path: PathBuf::from(path),
             category: FileCategory::SourceCode,
+            content: content.to_owned(),
             token_count: tokenized.source_token_count,
             tokens: tokenized.tokens,
         }

@@ -29,6 +29,7 @@ pub(crate) struct ScannedDocument {
     pub(crate) absolute_path: PathBuf,
     pub(crate) relative_path: PathBuf,
     pub(crate) category: FileCategory,
+    pub(crate) content: String,
     pub(crate) token_count: usize,
     pub(crate) tokens: Vec<Token>,
 }
@@ -86,6 +87,7 @@ pub(crate) fn scan_documents(root: &Path) -> Result<Vec<ScannedDocument>> {
             absolute_path: entry.path().to_path_buf(),
             category: classify_file(&relative_path),
             relative_path,
+            content,
             token_count: tokenized.source_token_count,
             tokens: tokenized.tokens,
         });
@@ -185,6 +187,7 @@ mod tests {
         assert_eq!(documents[3].category, FileCategory::Configuration);
         assert_eq!(documents[4].category, FileCategory::SourceCode);
         assert_eq!(documents[5].category, FileCategory::Test);
+        assert_eq!(documents[4].content, "fn build_search_index");
         assert_eq!(documents[4].token_count, 2);
         assert_eq!(documents[4].tokens.len(), 5);
         assert_eq!(documents[4].tokens[0].term, "fn");

@@ -22,7 +22,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "shun",
     version,
-    about = "Search repositories and audit documentation with local, explainable evidence"
+    about = "Search repository files and check documentation references"
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -31,5 +31,14 @@ pub(crate) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Build an in-memory index and report repository statistics.
     Index { directory: PathBuf },
+    /// Search repository content with normalized developer-aware terms.
+    Search {
+        query: String,
+        #[arg(short, long, default_value = ".")]
+        directory: PathBuf,
+        #[arg(long)]
+        match_all: bool,
+    },
 }
