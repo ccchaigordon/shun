@@ -53,6 +53,8 @@ A search scans the selected repository and builds an index in memory. Persistent
 
 `SearchIndex` stores documents, term postings, document frequency, total source tokens, and average document length. `BTreeMap` keeps term iteration ordered.
 
+`SearchFilters` stores selected categories and extensions, optional path text, and an optional result limit. Category and extension values are normalized before filtering.
+
 ## Query Processing
 
 Queries use the same tokenizer as repository files. Variants from one source query token form a group. A camel-case query such as `SearchIndex` can match the complete term or its `search` and `index` components.
@@ -64,6 +66,8 @@ Matched documents are scored with BM25 using `k1 = 1.2` and `b = 0.75`. The calc
 The final score adds repository-aware factors to BM25. A query-group match in the file stem adds `2.0`, and a match in the parent path adds `1.0`. Fixed category priors range from `0.30` for source code to `0.0` for unknown files. Metadata terms boost documents already retrieved through indexed content rather than creating candidates by themselves. Exact symbol boosts remain deferred until Rust symbols are indexed.
 
 Every result retains its BM25, file-name, path, and category factors. Terminal output reports those values and groups results as implementation, documentation, configuration, tests, examples, project metadata, and other. Group order is fixed, while each displayed rank retains the global score order. Results remain score-ordered within each group. Equal scores are ordered by repository path.
+
+Filtering runs after ranking. Values within a category or extension list use OR matching, while category, extension, and path filters combine with AND matching. Path matching ignores letter case. The result limit is applied last, preserving global score order before terminal grouping.
 
 ## Snippets
 

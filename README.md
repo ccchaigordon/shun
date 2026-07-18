@@ -22,6 +22,8 @@ Available now:
 - Multi-keyword search with OR matching and optional `--match-all` behavior.
 - BM25 ranking with file-name, path, and category boosts.
 - Results grouped by repository role with score factors and source-line snippets.
+- Category, extension, path, and result-count filters.
+- Bordered command, argument, and option help tables.
 - Terminal colors with plain redirected output and `NO_COLOR` support.
 
 Persistent storage, Rust symbols, related-file discovery, and documentation checks are planned.
@@ -99,7 +101,7 @@ target\release\shun.exe
 
 ## Running
 
-Running Shun without a subcommand displays its identity and generated command help:
+Running Shun without a subcommand displays its identity and table-based command help:
 
 ```text
  __ _
@@ -110,6 +112,22 @@ _\ \ | | | |_| | | | |
 
 Search code and documentation.
 ------------------------------------------------------------
+Search repository files and check documentation references
+
+Usage: shun [COMMAND]
+
++------------------------------------------------+
+|                    COMMANDS                    |
++--------+---------------------------------------+
+| index  | Build an in-memory index and report   |
+|        | repository statistics                 |
++--------+---------------------------------------+
+| search | Search repository content with        |
+|        | normalized developer-aware terms      |
++--------+---------------------------------------+
+| help   | Print this message or the help of the |
+|        | given subcommand(s)                   |
++--------+---------------------------------------+
 ```
 
 Display help:
@@ -217,7 +235,7 @@ Token counts change as source and documentation evolve.
 ## Current Search Command
 
 ```text
-shun search <QUERY> [-d <DIRECTORY> | --directory <DIRECTORY>] [--match-all]
+shun search [OPTIONS] <QUERY>
 ```
 
 The command scans and indexes the selected repository in memory for each invocation. The directory defaults to the current directory. When the selected path is `.`, reports display its absolute path. Query text uses the same developer-aware normalization as indexed content, including complete technical identifiers and their snake-case, camel-case, acronym, and kebab-case components.
@@ -225,6 +243,29 @@ The command scans and indexes the selected repository in memory for each invocat
 Default OR mode returns a document when any source query token matches. `--match-all` requires every source query token, while normalized variants from one identifier remain alternatives within that token. Results use BM25 with file-name, parent-path, and category boosts. They are grouped by repository role and ordered by score within each group, with repository path used to break ties.
 
 Shun uses BM25 parameters `k1 = 1.2` and `b = 0.75`. A normalized query-group match in the file stem adds `2.0`, while a match in the parent path adds `1.0`. Category priors add `0.30` for source code, `0.25` for documentation, `0.20` for configuration, `0.15` for tests, `0.10` for examples, `0.05` for project metadata, and `0.0` for unknown files. File-name and path terms boost documents retrieved from indexed content. They do not create matches by themselves.
+
+Search options:
+
+| Option                    | Behavior                                                                   |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `-d, --directory <PATH>`  | Search another repository. The default is the current directory.           |
+| `--match-all`             | Require every source query token.                                          |
+| `--category <CATEGORY>`   | Keep selected repository roles. Repeat it or use comma-separated values.   |
+| `--extension <EXTENSION>` | Keep selected file extensions. A leading dot and letter case are optional. |
+| `--path <TEXT>`           | Keep repository-relative paths containing text without case sensitivity.   |
+| `--limit <COUNT>`         | Keep the first positive number of globally ranked results.                 |
+
+Values within `--category` or `--extension` use OR matching. Different filter types combine with AND matching. Filters run after BM25 ranking, and `--limit` runs last. File-name and path boosts therefore use the complete repository index while the displayed results satisfy every active filter.
+
+Canonical category values are `source-code`, `documentation`, `configuration`, `tests`, `examples`, `project-metadata`, and `unknown`. The aliases `source`, `docs`, `test`, `example`, and `metadata` are also accepted.
+
+Examples:
+
+```powershell
+shun search "ranking" --category source-code,tests
+shun search "timeout" --extension toml,json --path config
+shun search "documentation" --category docs --limit 5
+```
 
 Always quote a multi-word query so the shell passes it as one argument. A query containing only punctuation, such as `"???"`, has no searchable terms. Shun reports this instead of performing a broad match.
 
@@ -279,11 +320,11 @@ Search result fields:
 | Matches  | Normalized complete terms or identifier components that produced the hit. |
 | Snippet  | Trimmed source line at the reported location.                             |
 
-`No matches found.` is printed when searchable query terms do not occur in the index. With `--match-all`, try fewer terms or omit the flag. With default OR matching, check spelling or use a broader technical term.
+`No matches found.` is printed when searchable query terms do not occur in the index. `No matches satisfy the active filters.` distinguishes a filtered empty result. With `--match-all`, try fewer terms or omit the flag. With default OR matching, check spelling or use a broader technical term.
 
 ## Terminal Display
 
-Search results use a bordered ASCII table with wrapped snippets. Colors distinguish headings, paths, categories, scores, and matched terms in an interactive terminal. They are disabled when standard output is redirected, which keeps files and pipelines free of ANSI escape sequences.
+Startup, command help, and search results use bordered ASCII tables with word-aware wrapping. Colors distinguish headings, paths, categories, scores, and matched terms in an interactive terminal. They are disabled when standard output is redirected, which keeps files and pipelines free of ANSI escape sequences.
 
 Set the conventional `NO_COLOR` environment variable to disable colors explicitly:
 
@@ -396,16 +437,16 @@ Recoverable errors are printed to standard error and scanning continues. One pro
 
 ## Command Status
 
-| Command               | Purpose                                                       | Status       |
-| --------------------- | ------------------------------------------------------------- | ------------ |
-| `shun index <path>`   | Scan a repository and report index statistics.                | Implemented. |
-| `shun search <query>` | Search repository files.                                      | Implemented. |
-| `shun symbol <name>`  | Find a Rust symbol definition and likely references.          | Planned.     |
-| `shun overview`       | Summarize project structure and likely workflow.              | Planned.     |
-| `shun related <path>` | Find likely tests, documentation, callers, and configuration. | Planned.     |
-| `shun audit-docs`     | Report potentially stale documentation references.            | Planned.     |
-| `shun stats`          | Display index and category statistics.                        | Planned.     |
-| `shun clear`          | Remove persisted index data.                                  | Planned.     |
+| Command                         | Purpose                                                       | Status       |
+| ------------------------------- | ------------------------------------------------------------- | ------------ |
+| `shun index <path>`             | Scan a repository and report index statistics.                | Implemented. |
+| `shun search [options] <query>` | Search and filter repository files.                           | Implemented. |
+| `shun symbol <name>`            | Find a Rust symbol definition and likely references.          | Planned.     |
+| `shun overview`                 | Summarize project structure and likely workflow.              | Planned.     |
+| `shun related <path>`           | Find likely tests, documentation, callers, and configuration. | Planned.     |
+| `shun audit-docs`               | Report potentially stale documentation references.            | Planned.     |
+| `shun stats`                    | Display index and category statistics.                        | Planned.     |
+| `shun clear`                    | Remove persisted index data.                                  | Planned.     |
 
 ## Testing
 
@@ -427,7 +468,7 @@ Check formatting:
 cargo fmt -- --check
 ```
 
-Tests cover classification, tokenization, source locations, scanning, indexing, BM25 ranking, boosts, grouping, snippets, terminal reports, count formatting, and color checks. Future tests will cover symbols, references, and documentation checks.
+Tests cover CLI parsing, help routing, filtering, classification, tokenization, source locations, scanning, indexing, BM25 ranking, boosts, grouping, snippets, terminal reports, count formatting, and color checks. Future tests will cover symbols, references, and documentation checks.
 
 A normal local verification sequence is:
 

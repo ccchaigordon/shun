@@ -54,6 +54,7 @@ Status: completed.
 - Add file-name, path, and category boosts
 - Group results by repository role
 - Report score factors
+- Filter results by category, extension, path, and result count
 - Defer exact symbol boosts until symbols are indexed
 
 ## Milestone 7: Rust Symbols and Overview
