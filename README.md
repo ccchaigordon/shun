@@ -247,13 +247,13 @@ Repository  D:\Career\example-folder
 +----------------------------------------+----------------------------------------+
 | Line: 5                                |       Category: Source code  Score: 20 |
 | Matches  inverted, postings                                                     |
-| Snippet  * This file builds and owns Shun's in-memory inverted index.            |
+| Snippet: * This file builds and owns Shun's in-memory inverted index.            |
 +----------------------------------------+----------------------------------------+
 |                                  #2  README.md                                  |
 +----------------------------------------+----------------------------------------+
 | Line: 50                               |     Category: Documentation  Score: 16 |
 | Matches  inverted, postings                                                     |
-| Snippet  - In-memory inverted index with term and document frequency.           |
+| Snippet: - In-memory inverted index with term and document frequency.           |
 +---------------------------------------------------------------------------------+
 ```
 

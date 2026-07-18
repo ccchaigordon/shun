@@ -17,6 +17,7 @@ use std::path::Path;
 use term_table::row::Row;
 use term_table::table_cell::{Alignment, TableCell};
 use term_table::{Table, TableStyle};
+use textwrap::Options;
 
 use crate::classifier::FileCategory;
 use crate::index::SearchIndex;
@@ -30,6 +31,8 @@ const BANNER: &str = r" __ _
 _\ \ | | | |_| | | | |
 \__/_| |_|\__,_|_| |_|";
 const SEPARATOR: &str = "------------------------------------------------------------";
+const SEARCH_TABLE_COLUMN_WIDTH: usize = 40;
+const SEARCH_TABLE_CONTENT_WIDTH: usize = SEARCH_TABLE_COLUMN_WIDTH * 2 - 1;
 
 const RESET: &str = "\x1b[0m";
 const BOLD_CYAN: &str = "\x1b[1;36m";
@@ -309,18 +312,27 @@ fn render_search_results_table(
             .build(),
         ]));
         rows.push(Row::without_separator(vec![
-            TableCell::builder(format!("Snippet  {snippet}"))
+            TableCell::builder(format_snippet(snippet))
                 .col_span(2)
                 .build(),
         ]));
     }
 
     Table::builder()
-        .max_column_width(40)
+        .max_column_width(SEARCH_TABLE_COLUMN_WIDTH)
         .style(TableStyle::simple())
         .rows(rows)
         .build()
         .render()
+}
+
+fn format_snippet(snippet: &str) -> String {
+    textwrap::fill(
+        snippet,
+        Options::new(SEARCH_TABLE_CONTENT_WIDTH)
+            .initial_indent("Snippet: ")
+            .subsequent_indent(""),
+    )
 }
 
 /// This isolates terminal and environment checks for deterministic tests.
@@ -440,15 +452,15 @@ mod tests {
     #[test]
     fn renders_search_results_and_empty_term_guidance() {
         let documents = vec![scanned_document(
-            "src/main.rs",
-            "search index with a source line that is intentionally longer than the table width and must wrap",
+            "src/cli.rs",
+            "* It uses clap to parse arguments, generate help messages, and then check",
         )];
         let index = SearchIndex::build(&documents);
-        let results = search(&index, "search", MatchMode::Any);
+        let results = search(&index, "help", MatchMode::Any);
 
         let output = render_search(
             Path::new("."),
-            "search",
+            "help",
             MatchMode::Any,
             &index,
             &documents,
@@ -456,16 +468,18 @@ mod tests {
             false,
         );
 
-        assert!(output.contains("SEARCH\nQuery       \"search\""));
+        assert!(output.contains("SEARCH\nQuery       \"help\""));
         assert!(output.contains("Match       ANY term (OR)"));
         assert!(output.contains("SEARCH RESULTS (1 match)"));
         assert!(output.contains("+"));
         assert!(output.contains("|"));
-        assert!(output.contains("#1  src/main.rs"));
+        assert!(output.contains("#1  src/cli.rs"));
         assert!(output.contains("Line: 1"));
         assert!(output.contains("Category: Source code  Score: 1"));
-        assert!(output.contains("Matches  search"));
-        assert!(output.contains("Snippet  search index"));
+        assert!(output.contains("Matches  help"));
+        assert!(output.contains("Snippet: * It uses clap"));
+        assert!(!output.contains("ch |\n| eck"));
+        assert!(output.lines().any(|line| line.contains("check")));
         assert!(output.lines().all(|line| line.chars().count() <= 83));
 
         let punctuation_output = render_search(

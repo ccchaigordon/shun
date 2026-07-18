@@ -45,6 +45,7 @@ The workflow verifies formatting, Clippy warnings, and the full test suite with 
 | `anyhow`     | Application errors and context.         |
 | `clap`       | CLI parsing and generated help.         |
 | `term-table` | Bordered search result tables.          |
+| `textwrap`   | Word-aware snippet wrapping.            |
 | `walkdir`    | Repository traversal.                   |
 | `tempfile`   | Temporary repository fixtures in tests. |
 
