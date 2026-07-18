@@ -99,7 +99,7 @@ pub(crate) fn scan_documents(root: &Path) -> Result<Vec<ScannedDocument>> {
 
 /// This determines whether a path has an extension supported by repository indexing.
 /// Parameters: path is the file-system path whose extension will be inspected.
-/// Returns: true for Rust source, documentation, and initial configuration formats;
+/// Returns: true for Rust source, documentation, and initial configuration formats,
 /// false when the extension is missing, unsupported, or is not valid UTF-8.
 fn is_supported(path: &Path) -> bool {
     path.extension()

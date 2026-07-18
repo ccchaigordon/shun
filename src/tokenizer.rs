@@ -16,20 +16,15 @@
 /// This represents one searchable term generated from a source token.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Token {
-    /// The normalized complete identifier or generated identifier component.
     pub(crate) term: String,
-    /// The zero-based position of the original token in the source text.
     pub(crate) position: usize,
-    /// The one-based source line on which the original token begins.
     pub(crate) line: usize,
 }
 
 /// This contains expanded searchable terms and the unexpanded document length.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TokenizedText {
-    /// Complete normalized identifiers and their unique searchable components.
     pub(crate) tokens: Vec<Token>,
-    /// The number of original source tokens before identifier expansion.
     pub(crate) source_token_count: usize,
 }
 
@@ -37,7 +32,7 @@ pub(crate) struct TokenizedText {
 /// Parameters: text is borrowed document content or a query string. The input is
 /// not modified.
 /// Returns: Complete identifiers and their unique components in source order.
-/// Positions are zero-based and shared by variants from the same source token;
+/// Positions are zero-based and shared by variants from the same source token,
 /// line numbers are one-based.
 pub(crate) fn tokenize(text: &str) -> TokenizedText {
     let mut tokens = Vec::new();
