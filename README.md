@@ -10,7 +10,7 @@ Use Shun to answer questions such as:
 - Which implementation and documentation files relate to the same feature?
 - Does the documentation mention paths, commands, options, or symbols that no longer exist?
 
-Shun currently supports repository scanning, file classification, technical identifier tokenization, in-memory indexing, and ranked keyword search. BM25 ranking, symbol extraction, related-file discovery, and documentation checks remain planned.
+Shun currently supports repository scanning, file classification, technical identifier tokenization, in-memory indexing, BM25 ranking, grouped keyword search, and score explanations. Symbol extraction, related-file discovery, and documentation checks remain planned.
 
 ## Current Status
 
@@ -20,10 +20,11 @@ Available now:
 - File classification and technical identifier tokenization.
 - An in-memory inverted index with source positions and line numbers.
 - Multi-keyword search with OR matching and optional `--match-all` behavior.
-- Term-frequency ranking with paths, categories, matched terms, and source-line snippets.
+- BM25 ranking with file-name, path, and category boosts.
+- Results grouped by repository role with score factors and source-line snippets.
 - Terminal colors with plain redirected output and `NO_COLOR` support.
 
-BM25 ranking, persistent storage, Rust symbols, related-file discovery, and documentation checks are planned.
+Persistent storage, Rust symbols, related-file discovery, and documentation checks are planned.
 
 The current `index` command scans repository files, builds an in-memory index, and reports corpus statistics. The `search` command builds the same index for a query and returns ranked line-aware results. The index is not persisted yet.
 
@@ -221,7 +222,9 @@ shun search <QUERY> [-d <DIRECTORY> | --directory <DIRECTORY>] [--match-all]
 
 The command scans and indexes the selected repository in memory for each invocation. The directory defaults to the current directory. When the selected path is `.`, reports display its absolute path. Query text uses the same developer-aware normalization as indexed content, including complete technical identifiers and their snake-case, camel-case, acronym, and kebab-case components.
 
-Default OR mode returns a document when any source query token matches. `--match-all` requires every source query token, while normalized variants from one identifier remain alternatives within that token. Results are ordered by summed term frequency, with repository path used to break ties.
+Default OR mode returns a document when any source query token matches. `--match-all` requires every source query token, while normalized variants from one identifier remain alternatives within that token. Results use BM25 with file-name, parent-path, and category boosts. They are grouped by repository role and ordered by score within each group, with repository path used to break ties.
+
+Shun uses BM25 parameters `k1 = 1.2` and `b = 0.75`. A normalized query-group match in the file stem adds `2.0`, while a match in the parent path adds `1.0`. Category priors add `0.30` for source code, `0.25` for documentation, `0.20` for configuration, `0.15` for tests, `0.10` for examples, `0.05` for project metadata, and `0.0` for unknown files. File-name and path terms boost documents retrieved from indexed content. They do not create matches by themselves.
 
 Always quote a multi-word query so the shell passes it as one argument. A query containing only punctuation, such as `"???"`, has no searchable terms. Shun reports this instead of performing a broad match.
 
@@ -243,16 +246,22 @@ Repository  C:\example-folder
 +---------------------------------------------------------------------------------+
 |                            SEARCH RESULTS (2 matches)                           |
 +---------------------------------------------------------------------------------+
+|                               IMPLEMENTATION (1)                                |
++---------------------------------------------------------------------------------+
 |                                 #1  src\index.rs                                |
 +----------------------------------------+----------------------------------------+
-| Line: 5                                |       Category: Source code  Score: 20 |
+| Line: 5                                |    Category: Source code  Score: 3.140 |
 | Matches  inverted, postings                                                     |
+| Factors: BM25 2.840 + file name 0.000 + path 0.000 + category 0.300             |
 | Snippet: * This file builds and owns Shun's in-memory inverted index.            |
 +----------------------------------------+----------------------------------------+
+|                                DOCUMENTATION (1)                                |
++---------------------------------------------------------------------------------+
 |                                  #2  README.md                                  |
 +----------------------------------------+----------------------------------------+
-| Line: 50                               |     Category: Documentation  Score: 16 |
+| Line: 50                               |  Category: Documentation  Score: 2.370 |
 | Matches  inverted, postings                                                     |
+| Factors: BM25 2.120 + file name 0.000 + path 0.000 + category 0.250             |
 | Snippet: - In-memory inverted index with term and document frequency.           |
 +---------------------------------------------------------------------------------+
 ```
@@ -261,11 +270,12 @@ Search result fields:
 
 | Field    | Meaning                                                                   |
 | -------- | ------------------------------------------------------------------------- |
-| `#`      | Rank after score and path ordering.                                       |
+| `#`      | Global score rank shown within the result's repository-role group.        |
 | Path     | Repository-relative file path.                                            |
 | Line     | One-based source line for the first match.                                |
 | Category | Repository role such as source code, documentation, or tests.             |
-| Score    | Sum of unique matching-term frequencies within the document.              |
+| Score    | BM25 plus file-name, parent-path, and category boosts.                    |
+| Factors  | Individual values contributing to the displayed score.                    |
 | Matches  | Normalized complete terms or identifier components that produced the hit. |
 | Snippet  | Trimmed source line at the reported location.                             |
 
@@ -417,7 +427,7 @@ Check formatting:
 cargo fmt -- --check
 ```
 
-Tests cover classification, tokenization, source locations, scanning, indexing, queries, ranking, snippets, terminal reports, count formatting, and color checks. Future tests will cover BM25, symbols, references, and documentation checks.
+Tests cover classification, tokenization, source locations, scanning, indexing, BM25 ranking, boosts, grouping, snippets, terminal reports, count formatting, and color checks. Future tests will cover symbols, references, and documentation checks.
 
 A normal local verification sequence is:
 
