@@ -22,7 +22,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "shun",
     version,
-    about = "Search repositories and audit documentation with local, explainable evidence"
+    about = "Search repository files and check documentation references"
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
