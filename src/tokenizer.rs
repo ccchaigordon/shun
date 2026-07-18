@@ -20,7 +20,6 @@
 /// Parameters: text is the borrowed document content or query string to normalize. The
 /// input is not modified.
 /// Returns: Owned lowercase terms in their original order.
-
 pub(crate) fn tokenize(text: &str) -> Vec<String> {
     text.split(|character: char| !character.is_alphanumeric())
         .filter(|token| !token.is_empty())

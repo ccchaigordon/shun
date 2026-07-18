@@ -37,7 +37,6 @@ pub(crate) struct ScannedDocument {
 /// Returns: A relative-path-sorted vector containing one ScannedDocument for every
 /// supported file that was read successfully, or an error when root does not exist,
 /// cannot be resolved, or is not a directory.
-
 pub(crate) fn scan_documents(root: &Path) -> Result<Vec<ScannedDocument>> {
     if !root.exists() {
         bail!("directory does not exist: {}", root.display());
@@ -99,7 +98,6 @@ pub(crate) fn scan_documents(root: &Path) -> Result<Vec<ScannedDocument>> {
 /// Parameters: path is the file-system path whose extension will be inspected.
 /// Returns: true for Rust source, documentation, and initial configuration formats;
 /// false when the extension is missing, unsupported, or is not valid UTF-8.
-
 fn is_supported(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -114,7 +112,6 @@ fn is_supported(path: &Path) -> bool {
 /// This prevents generated output, dependency caches, and editor settings from being traversed.
 /// Parameters: entry is the candidate directory entry provided by WalkDir.
 /// Returns: true only when the entry is a directory with a configured ignored name.
-
 fn is_ignored_directory(entry: &walkdir::DirEntry) -> bool {
     entry.file_type().is_dir()
         && matches!(

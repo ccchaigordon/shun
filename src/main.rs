@@ -27,7 +27,6 @@ use crate::scanner::{ScannedDocument, scan_documents};
 /// This starts Shun, runs the selected command, prints its result.
 /// Parameters: none
 /// Returns: Ok(()) when the command completes successfully or an error when command execution fails.
-
 fn main() -> Result<()> {
     let cli: Cli = Cli::parse();
 

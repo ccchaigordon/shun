@@ -61,7 +61,6 @@ impl fmt::Display for FileCategory {
 /// Parameters: path is the file path relative to the scanned repository root.
 /// Returns: The category selected from path conventions, well-known file names,
 /// and the file extension.
-
 pub(crate) fn classify_file(path: &Path) -> FileCategory {
     if has_component(path, "tests") || has_test_file_name(path) {
         return FileCategory::Test;
@@ -99,7 +98,6 @@ pub(crate) fn classify_file(path: &Path) -> FileCategory {
 /// Parameters: path is the repository-relative path and expected is the directory
 /// name to match without case sensitivity.
 /// Returns: true when any parent component matches the expected directory name.
-
 fn has_component(path: &Path, expected: &str) -> bool {
     path.parent().is_some_and(|parent| {
         parent.components().any(|component| {
@@ -114,7 +112,6 @@ fn has_component(path: &Path, expected: &str) -> bool {
 /// This detects common test-file naming conventions outside a tests directory.
 /// Parameters: path is the repository-relative path whose file stem is inspected.
 /// Returns: true for stems ending in _test, _tests, .test, or .spec.
-
 fn has_test_file_name(path: &Path) -> bool {
     path.file_stem()
         .and_then(|stem| stem.to_str())

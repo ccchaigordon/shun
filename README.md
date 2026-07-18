@@ -585,9 +585,39 @@ A normal local verification sequence is:
 
 ```powershell
 cargo fmt -- --check
-cargo check
-cargo test
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
 ```
+
+## Contribution Workflow
+
+Major features and unrelated changes should be developed on dedicated branches rather than committed directly to `main`.
+
+Recommended branch names use a short change type and topic:
+
+```text
+feat/file-classification
+feat/identifier-tokenization
+fix/scanner-path-handling
+docs/update-architecture
+```
+
+The expected workflow is:
+
+1. Update local `main` from `origin/main`.
+2. Create a focused feature or fix branch.
+3. Implement and validate one coherent milestone or change.
+4. Commit with a conventional prefix such as `feat:`, `fix:`, `test:`, `docs:`, or `chore:`.
+5. Push the branch and open a pull request into `main`.
+6. Merge only after review and the `Rust validation` check passes.
+
+Pull requests targeting `main` automatically run:
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`
+- `cargo test --locked --all-features`
+
+Configure the repository's branch protection rule to require the `Rust validation` status check before merging.
 
 ## Dependencies
 
