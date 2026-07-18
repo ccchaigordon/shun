@@ -247,7 +247,7 @@ pub(crate) fn render_search(
     output
 }
 
-/// This renders ranked matches as a bordered table with wrapped detail rows.
+/// This renders ranked matches grouped by repository role with scores.
 /// Parameters: index and scanned_documents resolve result metadata, results are ranked,
 /// and color controls ANSI styling within cells.
 /// Returns: A complete ASCII table ending in one newline.
@@ -273,49 +273,85 @@ fn render_search_results_table(
         .build(),
     ])];
 
+    let mut result_ranks = vec![0; index.documents.len()];
     for (rank, result) in results.iter().enumerate() {
-        let document = &index.documents[result.document_id];
-        let scanned_document = &scanned_documents[result.document_id];
-        let snippet = snippet_for(&scanned_document.content, result.line)
-            .expect("posting lines must resolve within scanned content");
+        result_ranks[result.document_id] = rank + 1;
+    }
+
+    for category in FileCategory::ALL {
+        let category_results: Vec<&SearchResult> = results
+            .iter()
+            .filter(|result| index.documents[result.document_id].category == category)
+            .collect();
+        if category_results.is_empty() {
+            continue;
+        }
 
         rows.push(Row::new(vec![
             TableCell::builder(paint(
-                &format!("#{}  {}", rank + 1, document.relative_path.display()),
-                BOLD_CYAN,
+                &format!(
+                    "{} ({})",
+                    result_group_label(category),
+                    format_count(category_results.len())
+                ),
+                YELLOW,
                 color,
             ))
             .col_span(2)
             .alignment(Alignment::Center)
             .build(),
         ]));
-        rows.push(Row::new(vec![
-            TableCell::builder(format!(
-                "Line: {}",
-                paint(&result.line.to_string(), CYAN, color)
-            ))
-            .build(),
-            TableCell::builder(format!(
-                "Category: {}  Score: {}",
-                paint(&document.category.to_string(), YELLOW, color),
-                paint(&format_count(result.score), GREEN, color)
-            ))
-            .alignment(Alignment::Right)
-            .build(),
-        ]));
-        rows.push(Row::without_separator(vec![
-            TableCell::builder(format!(
-                "Matches  {}",
-                paint(&result.matched_terms.join(", "), MAGENTA, color)
-            ))
-            .col_span(2)
-            .build(),
-        ]));
-        rows.push(Row::without_separator(vec![
-            TableCell::builder(format_snippet(snippet))
+
+        for result in category_results {
+            let document = &index.documents[result.document_id];
+            let scanned_document = &scanned_documents[result.document_id];
+            let rank = result_ranks[result.document_id];
+            let snippet = snippet_for(&scanned_document.content, result.line)
+                .expect("posting lines must resolve within scanned content");
+
+            rows.push(Row::new(vec![
+                TableCell::builder(paint(
+                    &format!("#{rank}  {}", document.relative_path.display()),
+                    BOLD_CYAN,
+                    color,
+                ))
+                .col_span(2)
+                .alignment(Alignment::Center)
+                .build(),
+            ]));
+            rows.push(Row::new(vec![
+                TableCell::builder(format!(
+                    "Line: {}",
+                    paint(&result.line.to_string(), CYAN, color)
+                ))
+                .build(),
+                TableCell::builder(format!(
+                    "Category: {}  Score: {}",
+                    paint(&document.category.to_string(), YELLOW, color),
+                    paint(&format_score(result.score), GREEN, color)
+                ))
+                .alignment(Alignment::Right)
+                .build(),
+            ]));
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(format!(
+                    "Matches  {}",
+                    paint(&result.matched_terms.join(", "), MAGENTA, color)
+                ))
                 .col_span(2)
                 .build(),
-        ]));
+            ]));
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(paint(&format_score_factors(result), DIM, color))
+                    .col_span(2)
+                    .build(),
+            ]));
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(format_snippet(snippet))
+                    .col_span(2)
+                    .build(),
+            ]));
+        }
     }
 
     Table::builder()
@@ -324,6 +360,28 @@ fn render_search_results_table(
         .rows(rows)
         .build()
         .render()
+}
+
+fn result_group_label(category: FileCategory) -> &'static str {
+    match category {
+        FileCategory::SourceCode => "IMPLEMENTATION",
+        FileCategory::Documentation => "DOCUMENTATION",
+        FileCategory::Configuration => "CONFIGURATION",
+        FileCategory::Test => "TESTS",
+        FileCategory::Example => "EXAMPLES",
+        FileCategory::ProjectMetadata => "PROJECT METADATA",
+        FileCategory::Unknown => "OTHER",
+    }
+}
+
+fn format_score_factors(result: &SearchResult) -> String {
+    format!(
+        "Factors: BM25 {} + file name {} + path {} + category {}",
+        format_score(result.score_factors.bm25),
+        format_score(result.score_factors.file_name_boost),
+        format_score(result.score_factors.path_boost),
+        format_score(result.score_factors.category_boost)
+    )
 }
 
 fn format_snippet(snippet: &str) -> String {
@@ -376,6 +434,10 @@ fn format_count(value: usize) -> String {
     }
 
     output
+}
+
+fn format_score(value: f64) -> String {
+    format!("{value:.3}")
 }
 
 #[cfg(test)]
@@ -471,12 +533,15 @@ mod tests {
         assert!(output.contains("SEARCH\nQuery       \"help\""));
         assert!(output.contains("Match       ANY term (OR)"));
         assert!(output.contains("SEARCH RESULTS (1 match)"));
+        assert!(output.contains("IMPLEMENTATION (1)"));
         assert!(output.contains("+"));
         assert!(output.contains("|"));
         assert!(output.contains("#1  src/cli.rs"));
         assert!(output.contains("Line: 1"));
-        assert!(output.contains("Category: Source code  Score: 1"));
+        assert!(output.contains("Category: Source code  Score: 0."));
         assert!(output.contains("Matches  help"));
+        assert!(output.contains("Factors: BM25 0."));
+        assert!(output.contains("file name 0.000 + path 0.000 + category 0.300"));
         assert!(output.contains("Snippet: * It uses clap"));
         assert!(!output.contains("ch |\n| eck"));
         assert!(output.lines().any(|line| line.contains("check")));
@@ -492,5 +557,42 @@ mod tests {
             false,
         );
         assert!(punctuation_output.contains("No searchable terms in the query."));
+    }
+
+    #[test]
+    fn groups_search_results_by_repository_role() {
+        let mut documents = vec![
+            scanned_document("src/search.rs", "search"),
+            scanned_document("README.md", "search search search search"),
+            scanned_document("config/shun.toml", "search search"),
+        ];
+        documents[1].category = FileCategory::Documentation;
+        documents[2].category = FileCategory::Configuration;
+        let index = SearchIndex::build(&documents);
+        let results = search(&index, "search", MatchMode::Any);
+
+        let output = render_search(
+            Path::new("."),
+            "search",
+            MatchMode::Any,
+            &index,
+            &documents,
+            &results,
+            false,
+        );
+
+        let implementation = output.find("IMPLEMENTATION (1)").unwrap();
+        let documentation = output.find("DOCUMENTATION (1)").unwrap();
+        let configuration = output.find("CONFIGURATION (1)").unwrap();
+        assert!(implementation < documentation);
+        assert!(documentation < configuration);
+        for document in &index.documents {
+            let rank = results
+                .iter()
+                .position(|result| result.document_id == document.id)
+                .unwrap()
+                + 1;
+            assert!(output.contains(&format!("#{rank}  {}", document.relative_path.display())));
+        }
     }
 }
