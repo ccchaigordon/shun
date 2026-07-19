@@ -1,5 +1,8 @@
 # Shun
 
+[![Rust validation](https://github.com/ccchaigordon/shun/actions/workflows/rust.yml/badge.svg)](https://github.com/ccchaigordon/shun/actions/workflows/rust.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Shun is a local Rust CLI for searching software repositories and catching documentation that no longer matches the code.
 
 It indexes source code, tests, configuration, documentation, and project metadata using deterministic and explainable retrieval.
@@ -79,8 +82,8 @@ Semantic retrieval will not replace exact symbol lookup, deterministic documenta
 
 A future search interface may support these planned modes:
 
-| Mode       | Purpose                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------- |
+| Mode       | Purpose                                                                                |
+| ---------- | -------------------------------------------------------------------------------------- |
 | `keyword`  | Existing BM25 and structural retrieval for exact technical terms.                      |
 | `semantic` | Meaning-based retrieval over source-aware repository chunks.                           |
 | `hybrid`   | Rank fusion across keyword and semantic candidates while preserving structural boosts. |
@@ -115,7 +118,7 @@ Shun uses Rust edition 2024 and should be built with a recent stable Rust toolch
 
 Install Rust through [rustup](https://rustup.rs/), then verify the tools:
 
-```powershell
+```console
 rustc --version
 cargo --version
 ```
@@ -126,38 +129,38 @@ No database, network service, or external search engine is required.
 
 From the crate directory, run Shun without a command to see its startup screen and available commands:
 
-```powershell
+```console
 cargo run
 ```
 
 Build and save an index for the current repository:
 
-```powershell
+```console
 cargo run -- index .
 ```
 
 Search the current repository. Quote queries that contain spaces:
 
-```powershell
+```console
 cargo run -- search "search index"
 ```
 
 Require every query token instead of the default match-any behavior:
 
-```powershell
+```console
 cargo run -- search "search index" --match-all
 ```
 
 Find an exact Rust symbol and summarize the current repository:
 
-```powershell
+```console
 cargo run -- symbol SearchIndex
 cargo run -- overview
 ```
 
 Find files related to a source module and audit Markdown references:
 
-```powershell
+```console
 cargo run -- related src/index.rs
 cargo run -- audit-docs --confidence high
 ```
@@ -174,24 +177,28 @@ As the reference material grows, detailed ranking, configuration, output-format,
 
 ## Building
 
-From the crate directory:
+Change into the crate directory, then build the debug executable:
 
-```powershell
-cd C:\example-folder
+```console
 cargo build
 ```
 
 Build an optimized executable with:
 
-```powershell
+```console
 cargo build --release
 ```
 
-Executable locations on Windows:
+Executable locations:
 
 ```text
+Windows
 target\debug\shun.exe
 target\release\shun.exe
+
+Unix
+target/debug/shun
+target/release/shun
 ```
 
 ## Running
@@ -245,7 +252,7 @@ Usage: shun [OPTIONS] [COMMAND]
 
 Display help:
 
-```powershell
+```console
 cargo run
 cargo run -- --help
 cargo run -- index --help
@@ -260,37 +267,41 @@ cargo run -- clear --help
 
 Scan the current repository:
 
-```powershell
+```console
 cargo run -- index .
 ```
 
-Scan another repository:
+Scan another repository. Shun accepts native platform paths:
 
-```powershell
+```console
+# Windows
 cargo run -- index "C:\another-folder"
+
+# Unix
+cargo run -- index "/path/to/another-folder"
 ```
 
 Exclude directory names while indexing. Repeat `--exclude` or use commas:
 
-```powershell
+```console
 cargo run -- index . --exclude fixtures,vendor --exclude generated
 ```
 
 Search the current repository with default OR matching:
 
-```powershell
+```console
 cargo run -- search "inverted postings"
 ```
 
 Require every source query token and search another repository:
 
-```powershell
-cargo run -- search "database timeout" --match-all --directory "C:\another-folder"
+```console
+cargo run -- search "database timeout" --match-all --directory "/path/to/another-folder"
 ```
 
 Read the saved index as JSON, force plain human output, or remove it:
 
-```powershell
+```console
 cargo run -- stats --format json
 cargo run -- search "database timeout" --no-color
 cargo run -- clear
@@ -298,19 +309,23 @@ cargo run -- clear
 
 Run the built executable directly:
 
-```powershell
+```console
+# Windows
 .\target\debug\shun.exe index .
+
+# Unix
+./target/debug/shun index .
 ```
 
 Install Shun into Cargo's binary directory:
 
-```powershell
+```console
 cargo install --path .
 ```
 
 After installation:
 
-```powershell
+```console
 shun --help
 shun index .
 shun search "search index"
@@ -320,7 +335,7 @@ shun related src/index.rs
 shun audit-docs --confidence high
 ```
 
-If `shun` is not recognized, ensure `%USERPROFILE%\.cargo\bin` is included in the user `PATH`.
+If `shun` is not recognized, ensure `%USERPROFILE%\.cargo\bin` on Windows or `$HOME/.cargo/bin` on Unix is included in `PATH`.
 
 ## Current Index Command
 
@@ -338,7 +353,7 @@ The command performs these steps:
 
 Example:
 
-```powershell
+```console
 shun index .
 ```
 
@@ -400,7 +415,7 @@ Canonical category values are `source-code`, `documentation`, `configuration`, `
 
 Examples:
 
-```powershell
+```console
 shun search "ranking" --category source-code,tests
 shun search "timeout" --extension toml,json --path config
 shun search "documentation" --category docs --limit 5
@@ -408,9 +423,11 @@ shun search "documentation" --category docs --limit 5
 
 Always quote a multi-word query so the shell passes it as one argument. A query containing only punctuation, such as `"???"`, has no searchable terms. Shun reports this instead of performing a broad match.
 
+The examples use double quotes, which work in PowerShell, Command Prompt, and common POSIX shells. Repository-relative paths may use the platform's native separator; Shun normalizes paths before matching them.
+
 Example:
 
-```powershell
+```console
 shun search "inverted postings"
 ```
 
@@ -469,9 +486,9 @@ shun symbol [OPTIONS] <NAME>
 
 `symbol` parses supported Rust files with `syn` and finds definitions whose names exactly match the case-sensitive query. It reports symbol kind, visibility, parent symbol, source line, and a source snippet. It also reports likely references found through normalized text tokens. These references are navigation hints, not compiler-resolved usages.
 
-```powershell
+```console
 shun symbol SearchIndex
-shun symbol ProjectOverview --directory "C:\another-folder"
+shun symbol ProjectOverview --directory "/path/to/another-folder"
 ```
 
 A malformed Rust file is skipped during symbol parsing and reported without preventing valid files from being searched.
@@ -484,9 +501,9 @@ shun overview [OPTIONS]
 
 `overview` reads Cargo metadata and scanned repository roles to identify the Rust project type, package name, entry points, core modules, configuration, tests, and examples. Rust files with inline `#[cfg(test)]` modules or `#[test]` functions are included in the test section. The likely workflow starts at the primary entry point and lists its direct `crate::...` imports. It is a structural summary, not a runtime call graph.
 
-```powershell
+```console
 shun overview
-shun overview --directory "C:\another-folder"
+shun overview --directory "/path/to/another-folder"
 ```
 
 ## Related Files
@@ -497,9 +514,9 @@ shun related [OPTIONS] <PATH>
 
 `related` scores other repository files using references to non-private Rust symbols defined by the selected file, normalized file-name terms, and distinctive shared index terms. Results are grouped as implementation, documentation, configuration, tests, examples, project metadata, and other. Confidence expresses evidence strength rather than compiler-resolved relationships.
 
-```powershell
+```console
 shun related src/index.rs
-shun related src/search.rs --limit 10 --directory "C:\another-folder"
+shun related src/search.rs --limit 10 --directory "/path/to/another-folder"
 ```
 
 The path must be relative to the scanned repository. `--limit` defaults to 20 and applies before terminal grouping.
@@ -514,10 +531,10 @@ shun audit-docs [OPTIONS]
 
 High confidence covers unresolved paths, Shun commands, and Shun options. Medium confidence covers unresolved Rust symbols and modules. Low confidence covers conservative snake-style configuration assignments. Generated paths and lines explicitly marked planned, historical, or deferred are ignored to reduce false positives.
 
-```powershell
+```console
 shun audit-docs
 shun audit-docs --confidence high
-shun audit-docs --directory "C:\another-folder" --confidence medium
+shun audit-docs --directory "/path/to/another-folder" --confidence medium
 ```
 
 The confidence option is a minimum threshold. `high` reports only high-confidence findings, `medium` includes high and medium, and the default `low` includes all findings.
@@ -528,10 +545,18 @@ Startup, command help, and search results use bordered ASCII tables with word-aw
 
 Set the conventional `NO_COLOR` environment variable to disable colors explicitly:
 
+PowerShell:
+
 ```powershell
 $env:NO_COLOR = "1"
 shun search "search index"
 Remove-Item Env:NO_COLOR
+```
+
+POSIX shell:
+
+```console
+NO_COLOR=1 shun search "search index"
 ```
 
 Spacing, separators, labels, and result ordering remain the same with or without color.
@@ -671,19 +696,19 @@ Recoverable errors are printed to standard error and scanning continues. One pro
 
 Run all tests:
 
-```powershell
+```console
 cargo test
 ```
 
 Check compilation:
 
-```powershell
+```console
 cargo check
 ```
 
 Check formatting:
 
-```powershell
+```console
 cargo fmt -- --check
 ```
 
@@ -691,7 +716,7 @@ Tests cover CLI parsing, help routing, filtering, classification, tokenization, 
 
 A normal local verification sequence is:
 
-```powershell
+```console
 cargo fmt -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
