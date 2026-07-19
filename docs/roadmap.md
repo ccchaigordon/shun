@@ -70,10 +70,14 @@ Status: completed.
 
 ## Milestone 8: Documentation Checks and Related Files
 
+Status: completed.
+
 - Extract references from Markdown
 - Validate paths, symbols, commands, options, and configuration keys
 - Report confidence levels
 - Match source files with likely tests, documentation, callers, and configuration
+- Ignore generated paths and explicitly non-current documentation examples
+- Bound and group human-readable reports by repository role
 
 Documentation checks will look for references to missing paths, symbols, commands, options, modules, and configuration keys. Reports will distinguish exact failures from uncertain text matches.
 

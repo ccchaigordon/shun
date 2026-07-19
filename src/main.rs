@@ -14,8 +14,11 @@
 
 mod classifier;
 mod cli;
+mod documentation;
 mod index;
 mod overview;
+mod pathing;
+mod related;
 mod scanner;
 mod search;
 mod symbol;
@@ -31,13 +34,15 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser};
 
 use crate::cli::{Cli, Command};
+use crate::documentation::DocumentationAudit;
 use crate::index::SearchIndex;
 use crate::overview::ProjectOverview;
+use crate::related::find_related_files;
 use crate::scanner::{ScannedDocument, scan_documents};
 use crate::search::{MatchMode, SearchFilters, filter_results, search};
 use crate::terminal::{
-    SearchReport, color_enabled, render_command_help, render_index, render_overview, render_search,
-    render_startup, render_symbol,
+    SearchReport, color_enabled, render_audit, render_command_help, render_index, render_overview,
+    render_related, render_search, render_startup, render_symbol,
 };
 
 enum HelpTarget {
@@ -123,6 +128,43 @@ fn main() -> Result<()> {
                 &report_directory,
                 &overview,
                 &index,
+                color,
+            ))?;
+        }
+        Some(Command::Related {
+            path,
+            directory,
+            limit,
+        }) => {
+            let scanned_documents = scan_documents(&directory)?;
+            let index = SearchIndex::build(&scanned_documents);
+            let mut related =
+                find_related_files(&scanned_documents, &index, &path).ok_or_else(|| {
+                    anyhow::anyhow!("file is not in the scanned repository: {}", path.display())
+                })?;
+            related.results.truncate(limit);
+            let report_directory = report_directory(&directory)?;
+            write_output(&render_related(&report_directory, &related, &index, color))?;
+        }
+        Some(Command::AuditDocs {
+            directory,
+            confidence,
+        }) => {
+            let scanned_documents = scan_documents(&directory)?;
+            let index = SearchIndex::build(&scanned_documents);
+            let mut command = Cli::command();
+            command.build();
+            let mut audit = DocumentationAudit::build(&scanned_documents, &index, &command);
+            audit
+                .findings
+                .retain(|finding| confidence.includes(finding.confidence));
+            let report_directory = report_directory(&directory)?;
+            write_output(&render_audit(
+                &report_directory,
+                &audit,
+                &index,
+                &scanned_documents,
+                confidence,
                 color,
             ))?;
         }
