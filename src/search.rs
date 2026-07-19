@@ -24,6 +24,7 @@ const BM25_K1: f64 = 1.2;
 const BM25_B: f64 = 0.75;
 const FILE_NAME_BOOST: f64 = 2.0;
 const PATH_BOOST: f64 = 1.0;
+const EXACT_SYMBOL_BOOST: f64 = 4.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MatchMode {
@@ -36,12 +37,17 @@ pub(crate) struct ScoreFactors {
     pub(crate) bm25: f64,
     pub(crate) file_name_boost: f64,
     pub(crate) path_boost: f64,
+    pub(crate) exact_symbol_boost: f64,
     pub(crate) category_boost: f64,
 }
 
 impl ScoreFactors {
     pub(crate) fn total(self) -> f64 {
-        self.bm25 + self.file_name_boost + self.path_boost + self.category_boost
+        self.bm25
+            + self.file_name_boost
+            + self.path_boost
+            + self.exact_symbol_boost
+            + self.category_boost
     }
 }
 
@@ -109,6 +115,7 @@ struct ResultBuilder {
 /// Returns: Results ordered by descending BM25-plus-boost score and then path.
 pub(crate) fn search(index: &SearchIndex, query: &str, mode: MatchMode) -> Vec<SearchResult> {
     let query_groups = query_groups(query);
+    let exact_query_symbols = exact_query_symbols(index, query);
     if query_groups.is_empty() {
         return Vec::new();
     }
@@ -135,8 +142,13 @@ pub(crate) fn search(index: &SearchIndex, query: &str, mode: MatchMode) -> Vec<S
         })
         .map(|(document_id, builder)| {
             let document = &index.documents[document_id];
-            let score_factors =
-                score_factors(index, document, &builder.term_frequencies, &query_groups);
+            let score_factors = score_factors(
+                index,
+                document,
+                &builder.term_frequencies,
+                &query_groups,
+                &exact_query_symbols,
+            );
 
             SearchResult {
                 document_id,
@@ -192,6 +204,7 @@ fn score_factors(
     document: &IndexedDocument,
     term_frequencies: &BTreeMap<String, usize>,
     query_groups: &[Vec<String>],
+    exact_query_symbols: &BTreeSet<String>,
 ) -> ScoreFactors {
     let file_name_terms = document
         .relative_path
@@ -204,6 +217,13 @@ fn score_factors(
         .parent()
         .map(|path| normalized_terms(&path.to_string_lossy()))
         .unwrap_or_default();
+    let symbol_names = index
+        .symbols
+        .symbols
+        .iter()
+        .filter(|symbol| symbol.document_id == document.id)
+        .map(|symbol| symbol.name.clone())
+        .collect::<BTreeSet<_>>();
 
     ScoreFactors {
         bm25: term_frequencies
@@ -213,6 +233,8 @@ fn score_factors(
         file_name_boost: metadata_match_count(query_groups, &file_name_terms) as f64
             * FILE_NAME_BOOST,
         path_boost: metadata_match_count(query_groups, &path_terms) as f64 * PATH_BOOST,
+        exact_symbol_boost: exact_query_symbols.intersection(&symbol_names).count() as f64
+            * EXACT_SYMBOL_BOOST,
         category_boost: category_boost(document.category),
     }
 }
@@ -289,6 +311,35 @@ fn query_groups(query: &str) -> Vec<Vec<String>> {
         .into_values()
         .map(|terms| terms.into_iter().collect())
         .collect()
+}
+
+fn exact_query_symbols(index: &SearchIndex, query: &str) -> BTreeSet<String> {
+    index
+        .symbols
+        .symbols
+        .iter()
+        .filter(|symbol| contains_exact_identifier(query, &symbol.name))
+        .map(|symbol| symbol.name.clone())
+        .collect()
+}
+
+fn contains_exact_identifier(text: &str, identifier: &str) -> bool {
+    text.match_indices(identifier).any(|(start, _)| {
+        let end = start + identifier.len();
+        let starts_at_boundary = text[..start]
+            .chars()
+            .next_back()
+            .is_none_or(|character| !is_identifier_character(character));
+        let ends_at_boundary = text[end..]
+            .chars()
+            .next()
+            .is_none_or(|character| !is_identifier_character(character));
+        starts_at_boundary && ends_at_boundary
+    })
+}
+
+fn is_identifier_character(character: char) -> bool {
+    character.is_alphanumeric() || character == '_'
 }
 
 /// This orders higher scores first and resolves equal scores by repository path.
@@ -411,7 +462,31 @@ mod tests {
         assert_eq!(results[1].document_id, 2);
         assert_eq!(results[1].score_factors.file_name_boost, 0.0);
         assert_eq!(results[1].score_factors.path_boost, 1.0);
+        assert_eq!(results[1].score_factors.exact_symbol_boost, 0.0);
         assert_eq!(results[1].score_factors.category_boost, 0.25);
+    }
+
+    #[test]
+    fn boosts_exact_symbol_names_once_per_document() {
+        let documents = vec![scanned_document(
+            "src/model.rs",
+            "pub struct SearchIndex;\nimpl SearchIndex {}",
+        )];
+        let index = SearchIndex::build(&documents);
+
+        let results = search(&index, "SearchIndex", MatchMode::Any);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].score_factors.exact_symbol_boost, 4.0);
+        assert_eq!(results[0].score, results[0].score_factors.bm25 + 4.0 + 0.30);
+
+        let lowercase_results = search(&index, "searchindex", MatchMode::Any);
+        assert_eq!(lowercase_results.len(), 1);
+        assert_eq!(lowercase_results[0].score_factors.exact_symbol_boost, 0.0);
+
+        let embedded_results = search(&index, "MySearchIndex", MatchMode::Any);
+        assert_eq!(embedded_results.len(), 1);
+        assert_eq!(embedded_results[0].score_factors.exact_symbol_boost, 0.0);
     }
 
     #[test]
