@@ -12,7 +12,7 @@ Shun is currently a pre-1.0 project. Security fixes are applied to the `main` br
 
 Do not open a public issue for a suspected vulnerability.
 
-Use GitHub's private vulnerability reporting from the repository's **Security** tab. Include:
+Use GitHub's private vulnerability reporting from the repository's **Security** tab. If that option is unavailable, email `chaigordon75@gmail.com` with the subject `Security report for Shun`. Include:
 
 - The affected version or commit.
 - The operating system and relevant environment details.
