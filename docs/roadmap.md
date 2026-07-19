@@ -83,7 +83,9 @@ Documentation checks will look for references to missing paths, symbols, command
 
 ## Milestone 9: Persistence and CLI Controls
 
-- Save and load index data
-- Add statistics and clear commands
-- Add configurable exclusions
-- Add JSON output and controls for non-interactive use
+Status: Completed.
+
+- Save and load versioned index snapshots
+- Report saved-index statistics and clear persisted data
+- Merge built-in, configuration-file, and command-line exclusions
+- Emit command-specific JSON and support explicit color control

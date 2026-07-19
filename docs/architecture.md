@@ -17,23 +17,23 @@ File classification
 Tokenization
     |
     v
-In-memory inverted index
+Versioned snapshot and in-memory inverted index
     |
     v
 Text ranking, symbol lookup, project analysis, audit, or relation scoring
     |
     v
-Terminal report
+Human terminal report or structured JSON
 ```
 
-A search scans the selected repository and builds an index in memory. Persistent index storage is planned for a later milestone.
+`index` scans the selected repository and writes a versioned snapshot. Repository commands load saved documents and rebuild derived index structures in memory, or scan directly when no snapshot exists.
 
 ## Modules
 
 | File                   | Responsibility                                                                                        |
 | ---------------------- | ----------------------------------------------------------------------------------------------------- |
-| `src/main.rs`          | Parses arguments, dispatches commands, and writes rendered reports.                                   |
-| `src/cli.rs`           | Defines search, symbol, overview, related-file, and documentation-audit commands with Clap.           |
+| `src/main.rs`          | Parses arguments, loads or scans documents, dispatches commands, and selects an output format.        |
+| `src/cli.rs`           | Defines repository, lifecycle, exclusion, and global output controls with Clap.                       |
 | `src/classifier.rs`    | Assigns repository roles such as source, documentation, configuration, tests, examples, and metadata. |
 | `src/scanner.rs`       | Walks the repository, filters files and directories, reads UTF-8 content, and invokes the tokenizer.  |
 | `src/tokenizer.rs`     | Normalizes prose and technical identifiers into positioned terms.                                     |
@@ -45,6 +45,8 @@ A search scans the selected repository and builds an index in memory. Persistent
 | `src/documentation.rs` | Extracts Markdown references and validates them against repository evidence.                          |
 | `src/related.rs`       | Scores likely tests, documentation, callers, and configuration for a selected file.                   |
 | `src/terminal.rs`      | Renders all command reports as bounded tables with optional ANSI colors.                              |
+| `src/json_output.rs`   | Builds command-specific structured JSON values for non-interactive consumers.                         |
+| `src/storage.rs`       | Saves, validates, loads, and removes versioned repository snapshots under `.shun`.                    |
 
 ## Data Model
 
@@ -67,6 +69,20 @@ A search scans the selected repository and builds an index in memory. Persistent
 `RelatedResult` records a candidate document, score, confidence, matched source symbols, file-name terms, and distinctive shared terms.
 
 `SearchFilters` stores selected categories and extensions, optional path text, and an optional result limit. Category and extension values are normalized before filtering.
+
+`IndexSnapshot` stores a format version, canonical repository path, Unix timestamp, merged directory exclusions, and scanned documents. Derived postings and symbols are rebuilt rather than serialized twice.
+
+## Persistence and Exclusions
+
+Snapshots use pretty JSON at the selected repository's **.shun/index.json** location. Saving first creates `.shun` and then replaces the snapshot. Loading rejects unsupported format versions and repository-path mismatches. Clearing removes the file and its now-empty storage directory.
+
+The scanner merges built-in directory names, the optional root `.shun.toml` `exclude` array, and repeatable or comma-delimited `index --exclude` values. Directory names match at any depth. `.shun` is always excluded so an index cannot ingest itself.
+
+Read-oriented commands prefer a saved snapshot for deterministic and fast repeated work. Snapshots intentionally do not track file-system mutations; explicit `index` and `clear` commands own that lifecycle.
+
+## Output Boundary
+
+Command computation is shared by both output modes. `terminal.rs` owns bounded human-readable reports and ANSI color policy. `json_output.rs` owns structured values and includes a command discriminator, repository context, summary data, and command-specific results. `main.rs` pretty-serializes one JSON document with a trailing newline. JSON mode always disables ANSI rendering.
 
 ## Query Processing
 
@@ -110,6 +126,6 @@ Related-file scoring uses non-private, non-generic symbols defined in the select
 
 Results are deterministic, grouped by repository role, and described as likely relationships. They are not compiler-resolved callers or guaranteed test coverage.
 
-## Planned Changes
+## Roadmap Status
 
-Future milestones add index persistence, configurable exclusions, and machine-readable output. See [Roadmap](roadmap.md) for milestone status.
+All planned milestones are implemented. See [Roadmap](roadmap.md) for the delivered sequence.

@@ -14,6 +14,7 @@
  * ============================================================================
  */
 
+use std::fmt;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -28,16 +29,52 @@ use crate::documentation::Confidence;
     about = "Search repository files and check documentation references"
 )]
 pub(crate) struct Cli {
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value_t = OutputFormat::Human,
+        help = "Select human-readable or structured JSON output"
+    )]
+    pub(crate) format: OutputFormat,
+    #[arg(
+        long,
+        global = true,
+        help = "Disable ANSI colors in human-readable output"
+    )]
+    pub(crate) no_color: bool,
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum OutputFormat {
+    Human,
+    Json,
+}
+
+impl fmt::Display for OutputFormat {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Human => "human",
+            Self::Json => "json",
+        })
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-    /// Build an in-memory index and report repository statistics.
+    /// Build and save an index, then report repository statistics.
     Index {
         #[arg(help = "Repository directory to scan")]
         directory: PathBuf,
+        #[arg(
+            long = "exclude",
+            value_name = "DIRECTORY",
+            value_delimiter = ',',
+            help = "Exclude directory names. Repeat or separate values with commas"
+        )]
+        exclusions: Vec<String>,
     },
     /// Search repository content with normalized developer-aware terms.
     Search {
@@ -138,6 +175,26 @@ pub(crate) enum Command {
             help = "Minimum confidence to report"
         )]
         confidence: Confidence,
+    },
+    /// Display statistics from a saved repository index.
+    Stats {
+        #[arg(
+            short,
+            long,
+            default_value = ".",
+            help = "Repository containing the saved index"
+        )]
+        directory: PathBuf,
+    },
+    /// Remove saved index data from a repository.
+    Clear {
+        #[arg(
+            short,
+            long,
+            default_value = ".",
+            help = "Repository whose saved index should be removed"
+        )]
+        directory: PathBuf,
     },
 }
 
@@ -281,5 +338,42 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn parses_index_exclusions_and_storage_commands() {
+        let index = Cli::try_parse_from([
+            "shun",
+            "index",
+            ".",
+            "--exclude",
+            "vendor,fixtures",
+            "--exclude",
+            "archive",
+        ])
+        .unwrap();
+        assert!(matches!(
+            index.command,
+            Some(Command::Index { exclusions, .. })
+                if exclusions == ["vendor", "fixtures", "archive"]
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["shun", "stats"]).unwrap().command,
+            Some(Command::Stats { .. })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["shun", "clear"]).unwrap().command,
+            Some(Command::Clear { .. })
+        ));
+    }
+
+    #[test]
+    fn parses_global_non_interactive_controls() {
+        let cli =
+            Cli::try_parse_from(["shun", "search", "index", "--format", "json", "--no-color"])
+                .unwrap();
+
+        assert_eq!(cli.format, OutputFormat::Json);
+        assert!(cli.no_color);
     }
 }

@@ -15,16 +15,18 @@
  * ============================================================================
  */
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 use crate::classifier::{FileCategory, classify_file};
 use crate::tokenizer::{Token, tokenize};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ScannedDocument {
     pub(crate) absolute_path: PathBuf,
     pub(crate) relative_path: PathBuf,
@@ -34,12 +36,84 @@ pub(crate) struct ScannedDocument {
     pub(crate) tokens: Vec<Token>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScanOptions {
+    exclusions: BTreeSet<String>,
+}
+
+impl ScanOptions {
+    pub(crate) fn for_repository(
+        root: &Path,
+        exclusions: impl IntoIterator<Item = String>,
+    ) -> Result<Self> {
+        let mut configured = BUILT_IN_EXCLUSIONS
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect::<BTreeSet<_>>();
+        configured.extend(exclusions.into_iter().filter_map(normalize_exclusion));
+
+        let config_path = root.join(".shun.toml");
+        if config_path.is_file() {
+            let content = fs::read_to_string(&config_path)
+                .with_context(|| format!("failed to read {}", config_path.display()))?;
+            let config = toml::from_str::<ScannerConfig>(&content)
+                .with_context(|| format!("failed to parse {}", config_path.display()))?;
+            configured.extend(config.exclude.into_iter().filter_map(normalize_exclusion));
+        }
+
+        Ok(Self {
+            exclusions: configured,
+        })
+    }
+
+    pub(crate) fn exclusions(&self) -> impl Iterator<Item = &str> {
+        self.exclusions.iter().map(String::as_str)
+    }
+}
+
+fn normalize_exclusion(value: String) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self {
+            exclusions: BUILT_IN_EXCLUSIONS
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ScannerConfig {
+    #[serde(default)]
+    exclude: Vec<String>,
+}
+
+const BUILT_IN_EXCLUSIONS: &[&str] = &[
+    ".git",
+    ".shun",
+    "target",
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    ".idea",
+    ".vscode",
+];
+
 /// This recursively discovers and reads supported documents below a root directory.
 /// Parameters: root is the directory at which recursive traversal begins.
 /// Returns: A relative-path-sorted vector containing one ScannedDocument for every
 /// supported file that was read successfully, or an error when root does not exist,
 /// cannot be resolved, or is not a directory.
-pub(crate) fn scan_documents(root: &Path) -> Result<Vec<ScannedDocument>> {
+pub(crate) fn scan_documents_with_options(
+    root: &Path,
+    options: &ScanOptions,
+) -> Result<Vec<ScannedDocument>> {
     if !root.exists() {
         bail!("directory does not exist: {}", root.display());
     }
@@ -54,7 +128,7 @@ pub(crate) fn scan_documents(root: &Path) -> Result<Vec<ScannedDocument>> {
 
     for entry in WalkDir::new(&absolute_root)
         .into_iter()
-        .filter_entry(|entry| !is_ignored_directory(entry))
+        .filter_entry(|entry| !is_ignored_directory(entry, options))
     {
         let entry = match entry {
             Ok(entry) => entry,
@@ -117,21 +191,12 @@ fn is_supported(path: &Path) -> bool {
 /// This prevents generated output, dependency caches, and editor settings from being traversed.
 /// Parameters: entry is the candidate directory entry provided by WalkDir.
 /// Returns: true only when the entry is a directory with a configured ignored name.
-fn is_ignored_directory(entry: &walkdir::DirEntry) -> bool {
+fn is_ignored_directory(entry: &walkdir::DirEntry, options: &ScanOptions) -> bool {
     entry.file_type().is_dir()
-        && matches!(
-            entry.file_name().to_str(),
-            Some(
-                ".git"
-                    | "target"
-                    | "node_modules"
-                    | "dist"
-                    | "build"
-                    | "coverage"
-                    | ".idea"
-                    | ".vscode"
-            )
-        )
+        && entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| options.exclusions.contains(name))
 }
 
 #[cfg(test)]
@@ -158,7 +223,7 @@ mod tests {
         fs::write(source.join("image.png"), "not indexed")?;
         fs::write(generated.join("generated.rs"), "must be ignored")?;
 
-        let documents = scan_documents(directory.path())?;
+        let documents = scan_documents_with_options(directory.path(), &ScanOptions::default())?;
         let relative_paths: Vec<_> = documents
             .iter()
             .map(|document| document.relative_path.as_path())
@@ -193,6 +258,33 @@ mod tests {
         assert_eq!(documents[4].tokens[0].term, "fn");
         assert_eq!(documents[4].tokens[1].term, "build_search_index");
         assert_eq!(documents[4].tokens[4].term, "index");
+        Ok(())
+    }
+
+    #[test]
+    fn merges_and_normalizes_configured_exclusions() -> Result<()> {
+        let directory = tempfile::tempdir().context("failed to create temporary directory")?;
+        fs::write(
+            directory.path().join(".shun.toml"),
+            "exclude = [\" vendor \", \"\", \"target\"]",
+        )?;
+
+        let options = ScanOptions::for_repository(
+            directory.path(),
+            vec![" generated ".to_owned(), " ".to_owned()],
+        )?;
+        let exclusions = options.exclusions().collect::<Vec<_>>();
+
+        assert!(exclusions.contains(&"vendor"));
+        assert!(exclusions.contains(&"generated"));
+        assert_eq!(
+            exclusions
+                .iter()
+                .filter(|value| **value == "target")
+                .count(),
+            1
+        );
+        assert!(!exclusions.contains(&""));
         Ok(())
     }
 }
