@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 use crate::classifier::FileCategory;
 use crate::scanner::ScannedDocument;
+use crate::symbol::SymbolIndex;
 
 pub(crate) type DocumentId = usize;
 
@@ -44,6 +45,7 @@ pub(crate) struct SearchIndex {
     pub(crate) document_frequency: BTreeMap<String, usize>,
     pub(crate) total_token_count: usize,
     pub(crate) average_document_length: f64,
+    pub(crate) symbols: SymbolIndex,
 }
 
 #[derive(Debug, Default)]
@@ -104,6 +106,7 @@ impl SearchIndex {
             document_frequency,
             total_token_count,
             average_document_length,
+            symbols: SymbolIndex::build(scanned_documents),
         }
     }
 

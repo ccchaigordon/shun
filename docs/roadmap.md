@@ -59,12 +59,14 @@ Status: completed.
 
 ## Milestone 7: Rust Symbols and Overview
 
-Status: next.
+Status: completed.
 
 - Parse Rust source with `syn`
 - Add symbol lookup
 - Detect project type and entry points
 - Summarize modules, configuration, tests, and workflow
+- Report likely textual references separately from exact definitions
+- Boost exact symbol-name search matches
 
 ## Milestone 8: Documentation Checks and Related Files
 

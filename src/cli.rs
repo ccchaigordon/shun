@@ -80,6 +80,28 @@ pub(crate) enum Command {
         )]
         limit: Option<usize>,
     },
+    /// Find exact Rust symbol definitions and likely text references.
+    Symbol {
+        #[arg(help = "Case-sensitive Rust symbol name")]
+        name: String,
+        #[arg(
+            short,
+            long,
+            default_value = ".",
+            help = "Repository directory to inspect"
+        )]
+        directory: PathBuf,
+    },
+    /// Summarize project type, entry points, modules, and repository roles.
+    Overview {
+        #[arg(
+            short,
+            long,
+            default_value = ".",
+            help = "Repository directory to summarize"
+        )]
+        directory: PathBuf,
+    },
 }
 
 fn parse_positive_usize(value: &str) -> Result<usize, String> {
@@ -173,5 +195,34 @@ mod tests {
     #[test]
     fn rejects_a_zero_result_limit() {
         assert!(Cli::try_parse_from(["shun", "search", "ranking", "--limit", "0"]).is_err());
+    }
+
+    #[test]
+    fn parses_symbol_lookup_directory() {
+        let cli = Cli::try_parse_from([
+            "shun",
+            "symbol",
+            "SearchIndex",
+            "--directory",
+            "another-project",
+        ])
+        .unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Symbol { name, directory })
+                if name == "SearchIndex"
+                    && directory == std::path::Path::new("another-project")
+        ));
+    }
+
+    #[test]
+    fn parses_overview_default_directory() {
+        let cli = Cli::try_parse_from(["shun", "overview"]).unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Overview { directory }) if directory == std::path::Path::new(".")
+        ));
     }
 }

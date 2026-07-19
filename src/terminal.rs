@@ -22,8 +22,10 @@ use textwrap::Options;
 
 use crate::classifier::FileCategory;
 use crate::index::SearchIndex;
+use crate::overview::ProjectOverview;
 use crate::scanner::ScannedDocument;
 use crate::search::{MatchMode, SearchFilters, SearchResult, snippet_for};
+use crate::symbol::SymbolLookup;
 use crate::tokenizer::tokenize;
 
 const BANNER: &str = r" __ _
@@ -302,6 +304,289 @@ pub(crate) fn render_index(directory: &Path, index: &SearchIndex, color: bool) -
     output
 }
 
+pub(crate) fn render_symbol(
+    directory: &Path,
+    lookup: &SymbolLookup,
+    index: &SearchIndex,
+    scanned_documents: &[ScannedDocument],
+    color: bool,
+) -> String {
+    let mut output = String::new();
+    push_heading(&mut output, "SYMBOL", color);
+    output.push_str("Name        ");
+    output.push_str(&paint(&lookup.query, CYAN, color));
+    output.push('\n');
+    output.push_str("Repository  ");
+    output.push_str(&paint(&directory.display().to_string(), CYAN, color));
+    output.push('\n');
+    output.push_str("Parsed      ");
+    output.push_str(&paint(
+        &format!("{} symbols", format_count(index.symbols.symbols.len())),
+        GREEN,
+        color,
+    ));
+    if !index.symbols.parse_failures.is_empty() {
+        output.push_str(&paint(
+            &format!(
+                " ({} Rust files skipped)",
+                format_count(index.symbols.parse_failures.len())
+            ),
+            YELLOW,
+            color,
+        ));
+    }
+    output.push('\n');
+    output.push_str(&paint(SEPARATOR, DIM, color));
+    output.push('\n');
+
+    if lookup.definitions.is_empty() {
+        output.push_str(&paint(
+            "No exact Rust symbol definition found.",
+            YELLOW,
+            color,
+        ));
+        output.push('\n');
+        output.push_str(&paint(
+            "Symbol names are case-sensitive. Try the declared Rust identifier.",
+            DIM,
+            color,
+        ));
+        output.push('\n');
+        return output;
+    }
+
+    output.push('\n');
+    let mut definition_rows = vec![Row::new(vec![
+        TableCell::builder(paint(
+            &format!("DEFINITIONS ({})", format_count(lookup.definitions.len())),
+            BOLD_CYAN,
+            color,
+        ))
+        .col_span(2)
+        .alignment(Alignment::Center)
+        .build(),
+    ])];
+    for definition in &lookup.definitions {
+        let document = &index.documents[definition.document_id];
+        definition_rows.push(Row::new(vec![
+            TableCell::builder(paint(
+                &format!("{}:{}", document.relative_path.display(), definition.line),
+                CYAN,
+                color,
+            ))
+            .col_span(2)
+            .alignment(Alignment::Center)
+            .build(),
+        ]));
+        definition_rows.push(Row::without_separator(vec![
+            TableCell::builder(format!("Kind: {}", definition.kind)).build(),
+            TableCell::builder(format!("Visibility: {}", definition.visibility))
+                .alignment(Alignment::Right)
+                .build(),
+        ]));
+        if let Some(parent) = &definition.parent {
+            definition_rows.push(Row::without_separator(vec![
+                TableCell::builder(format!("Parent: {parent}"))
+                    .col_span(2)
+                    .build(),
+            ]));
+        }
+        let snippet = snippet_for(
+            &scanned_documents[definition.document_id].content,
+            definition.line,
+        )
+        .unwrap_or_default();
+        definition_rows.push(Row::without_separator(vec![
+            TableCell::builder(format_snippet(snippet))
+                .col_span(2)
+                .build(),
+        ]));
+    }
+    output.push_str(
+        &Table::builder()
+            .max_column_width(SEARCH_TABLE_COLUMN_WIDTH)
+            .style(TableStyle::simple())
+            .rows(definition_rows)
+            .build()
+            .render(),
+    );
+
+    output.push('\n');
+    if lookup.references.is_empty() {
+        output.push_str(&paint("No likely text references found.", DIM, color));
+        output.push('\n');
+        return output;
+    }
+
+    let mut reference_rows = vec![Row::new(vec![
+        TableCell::builder(paint(
+            &format!(
+                "LIKELY REFERENCES ({})",
+                format_count(lookup.references.len())
+            ),
+            BOLD_CYAN,
+            color,
+        ))
+        .col_span(2)
+        .alignment(Alignment::Center)
+        .build(),
+    ])];
+    for reference in &lookup.references {
+        let document = &index.documents[reference.document_id];
+        let snippet = snippet_for(
+            &scanned_documents[reference.document_id].content,
+            reference.line,
+        )
+        .unwrap_or_default();
+        reference_rows.push(Row::new(vec![
+            TableCell::builder(paint(
+                &format!("{}:{}", document.relative_path.display(), reference.line),
+                CYAN,
+                color,
+            ))
+            .col_span(2)
+            .alignment(Alignment::Center)
+            .build(),
+        ]));
+        reference_rows.push(Row::without_separator(vec![
+            TableCell::builder(format_snippet(snippet))
+                .col_span(2)
+                .build(),
+        ]));
+    }
+    output.push_str(
+        &Table::builder()
+            .max_column_width(SEARCH_TABLE_COLUMN_WIDTH)
+            .style(TableStyle::simple())
+            .rows(reference_rows)
+            .build()
+            .render(),
+    );
+    output
+}
+
+pub(crate) fn render_overview(
+    directory: &Path,
+    overview: &ProjectOverview,
+    index: &SearchIndex,
+    color: bool,
+) -> String {
+    let mut output = String::new();
+    push_heading(&mut output, "OVERVIEW", color);
+    output.push_str("Repository  ");
+    output.push_str(&paint(&directory.display().to_string(), CYAN, color));
+    output.push('\n');
+    output.push_str("Project     ");
+    output.push_str(&paint(&overview.project_kind.to_string(), YELLOW, color));
+    output.push('\n');
+    if let Some(package_name) = &overview.package_name {
+        output.push_str("Package     ");
+        output.push_str(&paint(package_name, CYAN, color));
+        output.push('\n');
+    }
+    output.push_str("Files       ");
+    output.push_str(&paint(&format_count(index.documents.len()), GREEN, color));
+    output.push('\n');
+    output.push_str("Symbols     ");
+    output.push_str(&paint(
+        &format_count(index.symbols.symbols.len()),
+        GREEN,
+        color,
+    ));
+    output.push('\n');
+    if !index.symbols.parse_failures.is_empty() {
+        output.push_str("Rust parse  ");
+        output.push_str(&paint(
+            &format!(
+                "{} files skipped",
+                format_count(index.symbols.parse_failures.len())
+            ),
+            YELLOW,
+            color,
+        ));
+        output.push('\n');
+    }
+    if let Some(error) = &overview.manifest_error {
+        output.push_str("Manifest    ");
+        output.push_str(&paint(
+            &format!("Could not parse Cargo.toml: {error}"),
+            YELLOW,
+            color,
+        ));
+        output.push('\n');
+    }
+    output.push_str(&paint(SEPARATOR, DIM, color));
+    output.push('\n');
+    output.push('\n');
+
+    let mut rows = Vec::new();
+    push_path_section(&mut rows, "ENTRY POINTS", &overview.entry_points, color);
+    push_path_section(&mut rows, "CORE MODULES", &overview.core_modules, color);
+    push_path_section(&mut rows, "CONFIGURATION", &overview.configuration, color);
+    push_path_section(&mut rows, "TESTS", &overview.tests, color);
+    push_path_section(&mut rows, "EXAMPLES", &overview.examples, color);
+    rows.push(Row::new(vec![
+        TableCell::builder(paint("LIKELY WORKFLOW", BOLD_CYAN, color))
+            .col_span(2)
+            .alignment(Alignment::Center)
+            .build(),
+    ]));
+    rows.push(Row::without_separator(vec![
+        TableCell::builder(if overview.workflow.is_empty() {
+            "No entry-point dependencies detected".to_owned()
+        } else {
+            overview.workflow.join(" -> ")
+        })
+        .col_span(2)
+        .alignment(Alignment::Center)
+        .build(),
+    ]));
+
+    output.push_str(
+        &Table::builder()
+            .max_column_width(SEARCH_TABLE_COLUMN_WIDTH)
+            .style(TableStyle::simple())
+            .rows(rows)
+            .build()
+            .render(),
+    );
+    output
+}
+
+fn push_path_section(
+    rows: &mut Vec<Row>,
+    heading: &str,
+    paths: &[std::path::PathBuf],
+    color: bool,
+) {
+    rows.push(Row::new(vec![
+        TableCell::builder(paint(
+            &format!("{heading} ({})", format_count(paths.len())),
+            BOLD_CYAN,
+            color,
+        ))
+        .col_span(2)
+        .alignment(Alignment::Center)
+        .build(),
+    ]));
+    if paths.is_empty() {
+        rows.push(Row::without_separator(vec![
+            TableCell::builder("None detected")
+                .col_span(2)
+                .alignment(Alignment::Center)
+                .build(),
+        ]));
+    } else {
+        rows.extend(paths.iter().map(|path| {
+            Row::without_separator(vec![
+                TableCell::builder(paint(&path.display().to_string(), CYAN, color))
+                    .col_span(2)
+                    .build(),
+            ])
+        }));
+    }
+}
+
 /// This renders query context, ranked matches, and line-aware snippets.
 /// Parameters: report contains the request, index, ranked results, and filters,
 /// while color controls ANSI styling.
@@ -555,10 +840,11 @@ fn result_group_label(category: FileCategory) -> &'static str {
 
 fn format_score_factors(result: &SearchResult) -> String {
     format!(
-        "Factors: BM25 {} + file name {} + path {} + category {}",
+        "Factors: BM25 {} + file name {} + path {} + exact symbol {} + category {}",
         format_score(result.score_factors.bm25),
         format_score(result.score_factors.file_name_boost),
         format_score(result.score_factors.path_boost),
+        format_score(result.score_factors.exact_symbol_boost),
         format_score(result.score_factors.category_boost)
     )
 }
@@ -750,7 +1036,8 @@ mod tests {
         assert!(output.contains("Category: Source code  Score: 0."));
         assert!(output.contains("Matches  help"));
         assert!(output.contains("Factors: BM25 0."));
-        assert!(output.contains("file name 0.000 + path 0.000 + category 0.300"));
+        assert!(output.contains("file name 0.000 + path 0.000 + exact symbol 0.000"));
+        assert!(output.contains("0.300"));
         assert!(output.contains("Snippet: * It uses clap"));
         assert!(!output.contains("ch |\n| eck"));
         assert!(output.lines().any(|line| line.contains("check")));

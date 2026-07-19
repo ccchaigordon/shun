@@ -15,8 +15,10 @@
 mod classifier;
 mod cli;
 mod index;
+mod overview;
 mod scanner;
 mod search;
+mod symbol;
 mod terminal;
 mod tokenizer;
 
@@ -30,10 +32,12 @@ use clap::{CommandFactory, Parser};
 
 use crate::cli::{Cli, Command};
 use crate::index::SearchIndex;
+use crate::overview::ProjectOverview;
 use crate::scanner::{ScannedDocument, scan_documents};
 use crate::search::{MatchMode, SearchFilters, filter_results, search};
 use crate::terminal::{
-    SearchReport, color_enabled, render_command_help, render_index, render_search, render_startup,
+    SearchReport, color_enabled, render_command_help, render_index, render_overview, render_search,
+    render_startup, render_symbol,
 };
 
 enum HelpTarget {
@@ -94,6 +98,31 @@ fn main() -> Result<()> {
                     results: &results,
                     filters: &filters,
                 },
+                color,
+            ))?;
+        }
+        Some(Command::Symbol { name, directory }) => {
+            let scanned_documents = scan_documents(&directory)?;
+            let index = SearchIndex::build(&scanned_documents);
+            let lookup = index.symbols.lookup(&scanned_documents, &name);
+            let report_directory = report_directory(&directory)?;
+            write_output(&render_symbol(
+                &report_directory,
+                &lookup,
+                &index,
+                &scanned_documents,
+                color,
+            ))?;
+        }
+        Some(Command::Overview { directory }) => {
+            let scanned_documents = scan_documents(&directory)?;
+            let index = SearchIndex::build(&scanned_documents);
+            let overview = ProjectOverview::build(&scanned_documents);
+            let report_directory = report_directory(&directory)?;
+            write_output(&render_overview(
+                &report_directory,
+                &overview,
+                &index,
                 color,
             ))?;
         }

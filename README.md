@@ -10,7 +10,7 @@ Use Shun to answer questions such as:
 - Which implementation and documentation files relate to the same feature?
 - Does the documentation mention paths, commands, options, or symbols that no longer exist?
 
-Shun currently supports repository scanning, file classification, technical identifier tokenization, in-memory indexing, BM25 ranking, grouped keyword search, and score explanations. Symbol extraction, related-file discovery, and documentation checks remain planned.
+Shun currently supports repository scanning, file classification, technical identifier tokenization, in-memory indexing, BM25 ranking, grouped keyword search, Rust symbol lookup, project overviews, and score explanations. Related-file discovery and documentation checks remain planned.
 
 ## Current Status
 
@@ -23,12 +23,14 @@ Available now:
 - BM25 ranking with file-name, path, and category boosts.
 - Results grouped by repository role with score factors and source-line snippets.
 - Category, extension, path, and result-count filters.
+- Rust symbol extraction with exact definition lookup and likely text references.
+- Project type, entry point, module, configuration, test, example, and workflow summaries.
 - Bordered command, argument, and option help tables.
 - Terminal colors with plain redirected output and `NO_COLOR` support.
 
-Persistent storage, Rust symbols, related-file discovery, and documentation checks are planned.
+Persistent storage, related-file discovery, and documentation checks are planned.
 
-The current `index` command scans repository files, builds an in-memory index, and reports corpus statistics. The `search` command builds the same index for a query and returns ranked line-aware results. The index is not persisted yet.
+The `index` command scans repository files, builds an in-memory index, and reports corpus statistics. `search` returns ranked line-aware results, `symbol` finds exact Rust definitions and likely references, and `overview` summarizes repository structure. The index is not persisted yet.
 
 ## Requirements
 
@@ -67,6 +69,13 @@ Require every query token instead of the default match-any behavior:
 
 ```powershell
 cargo run -- search "search index" --match-all
+```
+
+Find an exact Rust symbol and summarize the current repository:
+
+```powershell
+cargo run -- symbol SearchIndex
+cargo run -- overview
 ```
 
 `search` scans and indexes the selected repository for each invocation. You do not need to run `index` first. Neither command writes an index file yet.
@@ -116,18 +125,24 @@ Search repository files and check documentation references
 
 Usage: shun [COMMAND]
 
-+------------------------------------------------+
-|                    COMMANDS                    |
-+--------+---------------------------------------+
-| index  | Build an in-memory index and report   |
-|        | repository statistics                 |
-+--------+---------------------------------------+
-| search | Search repository content with        |
-|        | normalized developer-aware terms      |
-+--------+---------------------------------------+
-| help   | Print this message or the help of the |
-|        | given subcommand(s)                   |
-+--------+---------------------------------------+
++----------------------------------------------------+
+|                      COMMANDS                      |
++-----------+----------------------------------------+
+| index     | Build an in-memory index and report    |
+|           | repository statistics                  |
++-----------+----------------------------------------+
+| search    | Search repository content with         |
+|           | normalized developer-aware terms       |
++-----------+----------------------------------------+
+| symbol    | Find exact Rust symbol definitions and |
+|           | likely text references                 |
++-----------+----------------------------------------+
+| overview  | Summarize project type, entry points,  |
+|           | modules, and repository roles          |
++-----------+----------------------------------------+
+| help      | Print this message or the help of the  |
+|           | given subcommand(s)                    |
++-----------+----------------------------------------+
 ```
 
 Display help:
@@ -137,6 +152,8 @@ cargo run
 cargo run -- --help
 cargo run -- index --help
 cargo run -- search --help
+cargo run -- symbol --help
+cargo run -- overview --help
 ```
 
 Scan the current repository:
@@ -181,6 +198,8 @@ After installation:
 shun --help
 shun index .
 shun search "search index"
+shun symbol SearchIndex
+shun overview
 ```
 
 If `shun` is not recognized, ensure `%USERPROFILE%\.cargo\bin` is included in the user `PATH`.
@@ -240,9 +259,9 @@ shun search [OPTIONS] <QUERY>
 
 The command scans and indexes the selected repository in memory for each invocation. The directory defaults to the current directory. When the selected path is `.`, reports display its absolute path. Query text uses the same developer-aware normalization as indexed content, including complete technical identifiers and their snake-case, camel-case, acronym, and kebab-case components.
 
-Default OR mode returns a document when any source query token matches. `--match-all` requires every source query token, while normalized variants from one identifier remain alternatives within that token. Results use BM25 with file-name, parent-path, and category boosts. They are grouped by repository role and ordered by score within each group, with repository path used to break ties.
+Default OR mode returns a document when any source query token matches. `--match-all` requires every source query token, while normalized variants from one identifier remain alternatives within that token. Results use BM25 with file-name, parent-path, category, and exact-symbol boosts. They are grouped by repository role and ordered by score within each group, with repository path used to break ties.
 
-Shun uses BM25 parameters `k1 = 1.2` and `b = 0.75`. A normalized query-group match in the file stem adds `2.0`, while a match in the parent path adds `1.0`. Category priors add `0.30` for source code, `0.25` for documentation, `0.20` for configuration, `0.15` for tests, `0.10` for examples, `0.05` for project metadata, and `0.0` for unknown files. File-name and path terms boost documents retrieved from indexed content. They do not create matches by themselves.
+Shun uses BM25 parameters `k1 = 1.2` and `b = 0.75`. A normalized query-group match in the file stem adds `2.0`, while a match in the parent path adds `1.0`. An exact case-sensitive Rust symbol name adds `4.0` once per query token and document. Category priors add `0.30` for source code, `0.25` for documentation, `0.20` for configuration, `0.15` for tests, `0.10` for examples, `0.05` for project metadata, and `0.0` for unknown files. Metadata and symbol boosts only affect documents already retrieved from indexed content.
 
 Search options:
 
@@ -315,12 +334,40 @@ Search result fields:
 | Path     | Repository-relative file path.                                            |
 | Line     | One-based source line for the first match.                                |
 | Category | Repository role such as source code, documentation, or tests.             |
-| Score    | BM25 plus file-name, parent-path, and category boosts.                    |
+| Score    | BM25 plus file-name, parent-path, category, and exact-symbol boosts.      |
 | Factors  | Individual values contributing to the displayed score.                    |
 | Matches  | Normalized complete terms or identifier components that produced the hit. |
 | Snippet  | Trimmed source line at the reported location.                             |
 
 `No matches found.` is printed when searchable query terms do not occur in the index. `No matches satisfy the active filters.` distinguishes a filtered empty result. With `--match-all`, try fewer terms or omit the flag. With default OR matching, check spelling or use a broader technical term.
+
+## Rust Symbol Lookup
+
+```text
+shun symbol [OPTIONS] <NAME>
+```
+
+`symbol` parses supported Rust files with `syn` and finds definitions whose names exactly match the case-sensitive query. It reports symbol kind, visibility, parent symbol, source line, and a source snippet. It also reports likely references found through normalized text tokens. These references are navigation hints, not compiler-resolved usages.
+
+```powershell
+shun symbol SearchIndex
+shun symbol ProjectOverview --directory "C:\another-folder"
+```
+
+A malformed Rust file is skipped during symbol parsing and reported without preventing valid files from being searched.
+
+## Project Overview
+
+```text
+shun overview [OPTIONS]
+```
+
+`overview` reads Cargo metadata and scanned repository roles to identify the Rust project type, package name, entry points, core modules, configuration, tests, and examples. Rust files with inline `#[cfg(test)]` modules or `#[test]` functions are included in the test section. The likely workflow starts at the primary entry point and lists its direct `crate::...` imports. It is a structural summary, not a runtime call graph.
+
+```powershell
+shun overview
+shun overview --directory "C:\another-folder"
+```
 
 ## Terminal Display
 
@@ -340,7 +387,7 @@ Spacing, separators, labels, and result ordering remain the same with or without
 
 | Extension                   | Role                       | Current behavior                     |
 | --------------------------- | -------------------------- | ------------------------------------ |
-| `.rs`                       | Rust source and tests      | Read as UTF-8 and tokenized as text. |
+| `.rs`                       | Rust source and tests      | Tokenized and parsed for symbols.    |
 | `.md`                       | Documentation              | Read as UTF-8 and tokenized as text. |
 | `.txt`                      | Documentation or notes     | Read as UTF-8 and tokenized as text. |
 | `.toml`                     | Configuration and metadata | Read as UTF-8 and tokenized as text. |
@@ -441,8 +488,8 @@ Recoverable errors are printed to standard error and scanning continues. One pro
 | ------------------------------- | ------------------------------------------------------------- | ------------ |
 | `shun index <path>`             | Scan a repository and report index statistics.                | Implemented. |
 | `shun search [options] <query>` | Search and filter repository files.                           | Implemented. |
-| `shun symbol <name>`            | Find a Rust symbol definition and likely references.          | Planned.     |
-| `shun overview`                 | Summarize project structure and likely workflow.              | Planned.     |
+| `shun symbol <name>`            | Find a Rust symbol definition and likely references.          | Implemented. |
+| `shun overview`                 | Summarize project structure and likely workflow.              | Implemented. |
 | `shun related <path>`           | Find likely tests, documentation, callers, and configuration. | Planned.     |
 | `shun audit-docs`               | Report potentially stale documentation references.            | Planned.     |
 | `shun stats`                    | Display index and category statistics.                        | Planned.     |
@@ -468,7 +515,7 @@ Check formatting:
 cargo fmt -- --check
 ```
 
-Tests cover CLI parsing, help routing, filtering, classification, tokenization, source locations, scanning, indexing, BM25 ranking, boosts, grouping, snippets, terminal reports, count formatting, and color checks. Future tests will cover symbols, references, and documentation checks.
+Tests cover CLI parsing, help routing, filtering, classification, tokenization, source locations, scanning, indexing, BM25 ranking, boosts, grouping, snippets, Rust symbols, likely references, project overview detection, terminal reports, count formatting, and color checks. Future tests will cover documentation checks.
 
 A normal local verification sequence is:
 
