@@ -21,8 +21,10 @@ use term_table::{Table, TableStyle};
 use textwrap::Options;
 
 use crate::classifier::FileCategory;
+use crate::documentation::{Confidence, DocumentationAudit};
 use crate::index::SearchIndex;
 use crate::overview::ProjectOverview;
+use crate::related::RelatedFiles;
 use crate::scanner::ScannedDocument;
 use crate::search::{MatchMode, SearchFilters, SearchResult, snippet_for};
 use crate::symbol::SymbolLookup;
@@ -587,6 +589,262 @@ fn push_path_section(
     }
 }
 
+pub(crate) fn render_audit(
+    directory: &Path,
+    audit: &DocumentationAudit,
+    index: &SearchIndex,
+    scanned_documents: &[ScannedDocument],
+    minimum_confidence: Confidence,
+    color: bool,
+) -> String {
+    let mut output = String::new();
+    push_heading(&mut output, "DOCUMENTATION AUDIT", color);
+    output.push_str("Repository  ");
+    output.push_str(&paint(&directory.display().to_string(), CYAN, color));
+    output.push('\n');
+    output.push_str("Checked     ");
+    output.push_str(&paint(
+        &format!(
+            "{} Markdown files, {} references",
+            format_count(audit.documents_checked),
+            format_count(audit.references_checked)
+        ),
+        GREEN,
+        color,
+    ));
+    output.push('\n');
+    output.push_str("Confidence  ");
+    output.push_str(&paint(
+        &format!("{} and above", minimum_confidence),
+        confidence_style(minimum_confidence),
+        color,
+    ));
+    output.push('\n');
+    output.push_str(&paint(SEPARATOR, DIM, color));
+    output.push('\n');
+
+    if audit.findings.is_empty() {
+        output.push_str(&paint(
+            "No potentially stale references found at this confidence level.",
+            GREEN,
+            color,
+        ));
+        output.push('\n');
+        return output;
+    }
+
+    output.push('\n');
+    let mut rows = vec![Row::new(vec![
+        TableCell::builder(paint(
+            &format!(
+                "POTENTIALLY STALE DOCUMENTATION ({})",
+                format_count(audit.findings.len())
+            ),
+            BOLD_CYAN,
+            color,
+        ))
+        .col_span(2)
+        .alignment(Alignment::Center)
+        .build(),
+    ])];
+    let mut finding_number = 0;
+    for confidence in Confidence::ALL {
+        let findings = audit
+            .findings
+            .iter()
+            .filter(|finding| finding.confidence == confidence)
+            .collect::<Vec<_>>();
+        if findings.is_empty() {
+            continue;
+        }
+        rows.push(Row::new(vec![
+            TableCell::builder(paint(
+                &format!(
+                    "{} CONFIDENCE ({})",
+                    confidence,
+                    format_count(findings.len())
+                ),
+                confidence_style(confidence),
+                color,
+            ))
+            .col_span(2)
+            .alignment(Alignment::Center)
+            .build(),
+        ]));
+        for finding in findings {
+            finding_number += 1;
+            let document = &index.documents[finding.reference.document_id];
+            rows.push(Row::new(vec![
+                TableCell::builder(paint(
+                    &format!(
+                        "#{finding_number}  {}:{}",
+                        document.relative_path.display(),
+                        finding.reference.line
+                    ),
+                    CYAN,
+                    color,
+                ))
+                .col_span(2)
+                .alignment(Alignment::Center)
+                .build(),
+            ]));
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(format!("Kind: {}", finding.reference.kind)).build(),
+                TableCell::builder(format!("Reference: {}", finding.reference.value))
+                    .alignment(Alignment::Right)
+                    .build(),
+            ]));
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(finding.reason.clone())
+                    .col_span(2)
+                    .build(),
+            ]));
+            let snippet = snippet_for(
+                &scanned_documents[finding.reference.document_id].content,
+                finding.reference.line,
+            )
+            .unwrap_or_default();
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(format_snippet(snippet))
+                    .col_span(2)
+                    .build(),
+            ]));
+        }
+    }
+    output.push_str(
+        &Table::builder()
+            .max_column_width(SEARCH_TABLE_COLUMN_WIDTH)
+            .style(TableStyle::simple())
+            .rows(rows)
+            .build()
+            .render(),
+    );
+    output
+}
+
+pub(crate) fn render_related(
+    directory: &Path,
+    related: &RelatedFiles,
+    index: &SearchIndex,
+    color: bool,
+) -> String {
+    let source = &index.documents[related.source_document_id];
+    let mut output = String::new();
+    push_heading(&mut output, "RELATED FILES", color);
+    output.push_str("Source      ");
+    output.push_str(&paint(
+        &source.relative_path.display().to_string(),
+        CYAN,
+        color,
+    ));
+    output.push('\n');
+    output.push_str("Repository  ");
+    output.push_str(&paint(&directory.display().to_string(), CYAN, color));
+    output.push('\n');
+    output.push_str("Matches     ");
+    output.push_str(&paint(&format_count(related.results.len()), GREEN, color));
+    output.push('\n');
+    output.push_str(&paint(SEPARATOR, DIM, color));
+    output.push('\n');
+
+    if related.results.is_empty() {
+        output.push_str(&paint("No related files found.", YELLOW, color));
+        output.push('\n');
+        return output;
+    }
+
+    output.push('\n');
+    let mut rows = vec![Row::new(vec![
+        TableCell::builder(paint(
+            &format!(
+                "LIKELY RELATED FILES ({})",
+                format_count(related.results.len())
+            ),
+            BOLD_CYAN,
+            color,
+        ))
+        .col_span(2)
+        .alignment(Alignment::Center)
+        .build(),
+    ])];
+    for category in FileCategory::ALL {
+        let results = related
+            .results
+            .iter()
+            .filter(|result| index.documents[result.document_id].category == category)
+            .collect::<Vec<_>>();
+        if results.is_empty() {
+            continue;
+        }
+        rows.push(Row::new(vec![
+            TableCell::builder(paint(
+                &format!(
+                    "{} ({})",
+                    result_group_label(category),
+                    format_count(results.len())
+                ),
+                BOLD_CYAN,
+                color,
+            ))
+            .col_span(2)
+            .alignment(Alignment::Center)
+            .build(),
+        ]));
+        for result in results {
+            let document = &index.documents[result.document_id];
+            rows.push(Row::new(vec![
+                TableCell::builder(paint(
+                    &document.relative_path.display().to_string(),
+                    CYAN,
+                    color,
+                ))
+                .col_span(2)
+                .alignment(Alignment::Center)
+                .build(),
+            ]));
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(format!("Confidence: {}", result.confidence)).build(),
+                TableCell::builder(format!("Score: {}", format_score(result.score)))
+                    .alignment(Alignment::Right)
+                    .build(),
+            ]));
+            let mut evidence = Vec::new();
+            if !result.symbol_matches.is_empty() {
+                evidence.push(format!("Symbols: {}", result.symbol_matches.join(", ")));
+            }
+            if !result.file_term_matches.is_empty() {
+                evidence.push(format!(
+                    "File terms: {}",
+                    result.file_term_matches.join(", ")
+                ));
+            }
+            if !result.shared_terms.is_empty() {
+                evidence.push(format!("Shared terms: {}", result.shared_terms.join(", ")));
+            }
+            rows.push(Row::without_separator(vec![
+                TableCell::builder(evidence.join(" | ")).col_span(2).build(),
+            ]));
+        }
+    }
+    output.push_str(
+        &Table::builder()
+            .max_column_width(SEARCH_TABLE_COLUMN_WIDTH)
+            .style(TableStyle::simple())
+            .rows(rows)
+            .build()
+            .render(),
+    );
+    output
+}
+
+fn confidence_style(confidence: Confidence) -> &'static str {
+    match confidence {
+        Confidence::High => YELLOW,
+        Confidence::Medium => MAGENTA,
+        Confidence::Low => DIM,
+    }
+}
+
 /// This renders query context, ranked matches, and line-aware snippets.
 /// Parameters: report contains the request, index, ranked results, and filters,
 /// while color controls ANSI styling.
@@ -913,6 +1171,8 @@ mod tests {
 
     use crate::classifier::FileCategory;
     use crate::cli::Cli;
+    use crate::documentation::DocumentationAudit;
+    use crate::related::find_related_files;
     use crate::scanner::ScannedDocument;
     use crate::search::search;
     use crate::tokenizer::tokenize;
@@ -1128,5 +1388,63 @@ mod tests {
         assert!(output.contains("Limit       2"));
         assert!(output.contains("No matches satisfy the active filters."));
         assert!(output.contains("Adjust or remove a filter and try again."));
+    }
+
+    #[test]
+    fn renders_documentation_audit_findings_by_confidence() {
+        let mut documents = vec![
+            scanned_document(
+                "README.md",
+                "Missing `src/old.rs` and `initialize_server()`.",
+            ),
+            scanned_document("src/main.rs", "fn main() {}"),
+        ];
+        documents[0].category = FileCategory::Documentation;
+        let index = SearchIndex::build(&documents);
+        let mut command = Cli::command();
+        command.build();
+        let audit = DocumentationAudit::build(&documents, &index, &command);
+
+        let output = render_audit(
+            Path::new("."),
+            &audit,
+            &index,
+            &documents,
+            Confidence::Low,
+            false,
+        );
+
+        assert!(output.starts_with("DOCUMENTATION AUDIT\n"));
+        assert!(output.contains("POTENTIALLY STALE DOCUMENTATION (2)"));
+        assert!(output.contains("High CONFIDENCE (1)"));
+        assert!(output.contains("Medium CONFIDENCE (1)"));
+        assert!(output.contains("Reference: src/old.rs"));
+        assert!(output.contains("Reference: initialize_server"));
+        assert!(!output.contains("\x1b["));
+        assert!(output.lines().all(|line| line.chars().count() <= 83));
+    }
+
+    #[test]
+    fn renders_related_files_with_evidence_and_roles() {
+        let mut documents = vec![
+            scanned_document("src/index.rs", "pub struct SearchIndex;"),
+            scanned_document("tests/index_tests.rs", "SearchIndex verifies index"),
+            scanned_document("docs/index.md", "SearchIndex index guide"),
+        ];
+        documents[1].category = FileCategory::Test;
+        documents[2].category = FileCategory::Documentation;
+        let index = SearchIndex::build(&documents);
+        let related = find_related_files(&documents, &index, Path::new("src/index.rs")).unwrap();
+
+        let output = render_related(Path::new("."), &related, &index, false);
+
+        assert!(output.starts_with("RELATED FILES\nSource      src/index.rs"));
+        assert!(output.contains("LIKELY RELATED FILES (2)"));
+        assert!(output.contains("DOCUMENTATION (1)"));
+        assert!(output.contains("TESTS (1)"));
+        assert!(output.contains("Symbols: SearchIndex"));
+        assert!(output.contains("File terms: index"));
+        assert!(!output.contains("\x1b["));
+        assert!(output.lines().all(|line| line.chars().count() <= 83));
     }
 }

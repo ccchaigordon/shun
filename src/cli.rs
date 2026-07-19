@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::classifier::FileCategory;
+use crate::documentation::Confidence;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -101,6 +102,42 @@ pub(crate) enum Command {
             help = "Repository directory to summarize"
         )]
         directory: PathBuf,
+    },
+    /// Find tests, documentation, callers, and configuration related to a file.
+    Related {
+        #[arg(help = "Repository-relative file path to inspect")]
+        path: PathBuf,
+        #[arg(
+            short,
+            long,
+            default_value = ".",
+            help = "Repository directory to inspect"
+        )]
+        directory: PathBuf,
+        #[arg(
+            long,
+            default_value_t = 20,
+            value_parser = parse_positive_usize,
+            help = "Return at most this many related files"
+        )]
+        limit: usize,
+    },
+    /// Report potentially stale references in Markdown documentation.
+    AuditDocs {
+        #[arg(
+            short,
+            long,
+            default_value = ".",
+            help = "Repository directory to audit"
+        )]
+        directory: PathBuf,
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = Confidence::Low,
+            help = "Minimum confidence to report"
+        )]
+        confidence: Confidence,
     },
 }
 
@@ -223,6 +260,26 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Command::Overview { directory }) if directory == std::path::Path::new(".")
+        ));
+    }
+
+    #[test]
+    fn parses_related_limit_and_audit_confidence() {
+        let related =
+            Cli::try_parse_from(["shun", "related", "src/index.rs", "--limit", "8"]).unwrap();
+        assert!(matches!(
+            related.command,
+            Some(Command::Related { path, limit: 8, .. })
+                if path == std::path::Path::new("src/index.rs")
+        ));
+
+        let audit = Cli::try_parse_from(["shun", "audit-docs", "--confidence", "medium"]).unwrap();
+        assert!(matches!(
+            audit.command,
+            Some(Command::AuditDocs {
+                confidence: Confidence::Medium,
+                ..
+            })
         ));
     }
 }
