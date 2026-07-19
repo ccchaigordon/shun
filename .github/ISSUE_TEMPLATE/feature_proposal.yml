@@ -1,0 +1,72 @@
+name: Feature proposal
+description: Propose an agreed problem and possible Shun behavior
+title: "proposal: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Agreement on this issue is required before implementation begins. A proposal does not guarantee acceptance.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem being solved
+      description: Describe the repository-search or documentation problem without assuming a particular solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current workaround
+      description: Explain how the problem is handled today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful behavior change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: project-fit
+    attributes:
+      label: Why this belongs in Shun
+      description: Relate the proposal to local, deterministic, explainable repository retrieval or validation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: determinism
+    attributes:
+      label: Deterministic behavior and evidence
+      description: Explain effects on reproducibility and repository path or line evidence.
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Persistence and output compatibility
+      description: Note any saved-snapshot, JSON schema, or command-line compatibility impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: New dependencies
+      description: List proposed dependencies and justify each one, or state None.
+    validations:
+      required: true
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing approach
+      description: Describe focused tests and any retrieval evaluation needed.
+    validations:
+      required: true
