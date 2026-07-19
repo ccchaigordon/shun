@@ -33,7 +33,55 @@ Available now:
 - Configurable directory exclusions from the command line and a repository configuration file.
 - Saved-index statistics, clearing, and command-specific JSON reports.
 
+The original repository-search and documentation-audit scope is feature-complete and provides a usable first release. Future work will focus on improving retrieval quality and repository understanding rather than expanding the command surface without a clear use case.
+
 The `index` command scans repository files, writes a versioned snapshot under `.shun`, and reports corpus statistics. Repository commands load that snapshot when it exists, or scan the current files when it does not. `search` returns ranked line-aware results, `symbol` finds exact Rust definitions and likely references, `overview` summarizes repository structure, `related` connects a file to likely companions, and `audit-docs` reports potentially stale Markdown references.
+
+## Future Direction
+
+Shun's next major retrieval milestone is optional semantic search over repository chunks. Semantic search is planned and is not available in the current command interface.
+
+The current BM25, symbol, path, category, and structural signals remain the trusted retrieval core. Semantic retrieval is intended to improve conceptual queries where relevant code or documentation uses different wording from the user's query.
+
+Examples include:
+
+- Searching for "where requests are prevented from hanging" when the repository uses terms such as `deadline`, `timeout`, or `elapsed`.
+- Finding documentation related to a module after its terminology or file name has changed.
+- Improving related-file suggestions when exact symbols and shared terms provide limited evidence.
+
+Semantic retrieval will not replace exact symbol lookup, deterministic documentation audits, or BM25 keyword search. It will be introduced as an optional retrieval mode and evaluated against the existing search engine.
+
+A future search interface may support these planned modes:
+
+| Mode       | Purpose                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------- |
+| `keyword`  | Existing BM25 and structural retrieval for exact technical terms.                      |
+| `semantic` | Meaning-based retrieval over source-aware repository chunks.                           |
+| `hybrid`   | Rank fusion across keyword and semantic candidates while preserving structural boosts. |
+
+### AI and ML Positioning
+
+Shun is not intended to become a generic coding chatbot. Its role is to retrieve, rank, validate, and expose local repository evidence through deterministic, explainable, and CI-friendly workflows.
+
+Future AI-assisted features may use Shun as a local retrieval layer:
+
+```text
+Developer question
+    |
+    v
+Keyword and semantic retrieval
+    |
+    v
+Relevant code, tests, configuration, and documentation
+    |
+    v
+Optional model-generated explanation
+    |
+    v
+File and line evidence
+```
+
+Any generated answer should remain optional and cite the repository evidence used to produce it. Fully local, non-AI search and validation will remain available.
 
 ## Requirements
 
@@ -299,7 +347,9 @@ Token counts change as source and documentation evolve.
 shun search [OPTIONS] <QUERY>
 ```
 
-The command scans and indexes the selected repository in memory for each invocation. The directory defaults to the current directory. When the selected path is `.`, reports display its absolute path. Query text uses the same developer-aware normalization as indexed content, including complete technical identifiers and their snake-case, camel-case, acronym, and kebab-case components.
+The command searches the selected repository using a saved snapshot when one exists. If no snapshot is available, Shun scans and indexes the repository in memory for that invocation. The directory defaults to the current directory. When the selected path is `.`, reports display its absolute path. Query text uses the same developer-aware normalization as indexed content, including complete technical identifiers and their snake-case, camel-case, acronym, and kebab-case components.
+
+Saved snapshots are explicit and may become stale after repository files change. Run `shun index .` to replace the snapshot or `shun clear` to remove it; read-only commands do not refresh it automatically.
 
 Default OR mode returns a document when any source query token matches. `--match-all` requires every source query token, while normalized variants from one identifier remain alternatives within that token. Results use BM25 with file-name, parent-path, category, and exact-symbol boosts. They are grouped by repository role and ordered by score within each group, with repository path used to break ties.
 
@@ -621,4 +671,4 @@ cargo test --locked --all-features
 
 ## License
 
-No license file is currently present. Will add one before distributing Shun.
+Shun is available under the [MIT License](LICENSE). See [Contributing](CONTRIBUTING.md) for contribution expectations and the [Security Policy](SECURITY.md) for private vulnerability reporting.
