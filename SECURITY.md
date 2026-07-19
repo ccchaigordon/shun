@@ -22,6 +22,8 @@ Use GitHub's private vulnerability reporting from the repository's **Security** 
 
 The maintainer aims to acknowledge a report within seven days. After validation, the reporter and maintainer will coordinate remediation and disclosure. Please allow a reasonable period for a fix before publishing details.
 
+Shun is maintained on a best-effort basis, so remediation timelines depend on severity, reproducibility, maintainer availability, and the complexity of the required fix.
+
 Use the public issue tracker for ordinary defects that do not create a confidentiality, integrity, availability, or code-execution risk.
 
 ## Scope

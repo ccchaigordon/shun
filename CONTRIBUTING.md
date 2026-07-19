@@ -1,10 +1,12 @@
 # Contributing to Shun
 
-Shun is a maintainer-led project with a deliberately focused command surface. Bug reports, design proposals, and documentation corrections are welcome when they preserve the project's local, deterministic, explainable, and CI-friendly behavior. Public implementation contributions are not currently accepted unless the maintainer explicitly agrees to the scope and invites a pull request.
+Shun is a maintainer-led project with a deliberately focused command surface. Bug reports, design proposals, and documentation corrections are welcome when they preserve the project's local, deterministic, explainable, and CI-friendly behavior. Public implementation contributions are accepted only after the maintainer agrees to the proposed scope.
 
 ## Before You Start
 
-Search the existing issues before opening a new one. Before writing code, open an issue and wait for explicit maintainer agreement on the scope. This is especially important for new commands, dependencies, persistence-format changes, or retrieval-model changes. Unsolicited implementation pull requests may be closed without review.
+Search the existing issues before opening a new one. Small documentation corrections, such as typo fixes or broken-link repairs, may be submitted directly.
+
+For code changes, new features, dependency changes, persistence-format changes, retrieval-model changes, or broader documentation restructuring, open an issue and wait for maintainer agreement before beginning work. Unsolicited implementation pull requests may be closed without review.
 
 Do not report security vulnerabilities in a public issue. Follow the [Security Policy](SECURITY.md) instead.
 
@@ -62,3 +64,5 @@ By submitting a contribution, you confirm that you have the right to provide it 
 ## Conduct
 
 Be respectful and technical. Discuss ideas and code without personal attacks, harassment, or discriminatory language. The maintainer may moderate or close interactions that do not support constructive project work.
+
+Repeated disruptive behavior, spam, or refusal to follow maintainer guidance may result in issues or pull requests being locked or closed.

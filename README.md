@@ -1,6 +1,8 @@
 # Shun
 
-Shun is a Rust command-line tool for indexing and searching source code, documentation, configuration, tests, and project metadata.
+Shun is a local Rust CLI for searching software repositories and catching documentation that no longer matches the code.
+
+It indexes source code, tests, configuration, documentation, and project metadata using deterministic and explainable retrieval.
 
 Use Shun to answer questions such as:
 
@@ -9,6 +11,30 @@ Use Shun to answer questions such as:
 - Where is a Rust symbol defined and likely referenced?
 - Which implementation and documentation files relate to the same feature?
 - Does the documentation mention paths, commands, options, or symbols that no longer exist?
+
+## Terminal Demo
+
+This abbreviated plain-output recording shows the current deterministic command surface. The audit excerpt uses an isolated fixture containing an intentionally stale link.
+
+```text
+$ shun search "snapshot validation" --limit 1 --no-color
+SEARCH RESULTS (1 match)
+DOCUMENTATION (1)
+#1  docs\maintainer-guide.md  Line 12
+Category: Documentation  Score: 4.527
+Matches  snapshot, validation
+Factors: BM25 4.277 + category 0.250
+
+$ shun symbol SearchIndex --no-color
+DEFINITIONS (2)
+src\index.rs  Line 42  Struct          Visibility: crate
+src\index.rs  Line 57  Implementation  Visibility: private
+
+$ shun audit-docs --confidence high --no-color
+POTENTIALLY STALE DOCUMENTATION (1)
+High confidence  README.md:2  File path
+No matching repository path exists
+```
 
 Shun currently supports repository scanning, file classification, technical identifier tokenization, persistent indexing, BM25 ranking, grouped keyword search, Rust symbol lookup, project overviews, related-file discovery, documentation audits, score explanations, and structured JSON output.
 
@@ -143,6 +169,8 @@ You do not need to run `index` first: repository commands scan when no snapshot 
 - [Architecture](docs/architecture.md) describes the modules, data flow, index, and query model.
 - [Maintainer Guide](docs/maintainer-guide.md) records the maintenance and validation workflow.
 - [Roadmap](docs/roadmap.md) tracks completed and planned milestones.
+
+As the reference material grows, detailed ranking, configuration, output-format, and tokenization guidance will move into focused documents so this README remains a concise project overview and quick start.
 
 ## Building
 
