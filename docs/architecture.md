@@ -20,7 +20,7 @@ Tokenization
 In-memory inverted index
     |
     v
-Text ranking, symbol lookup, or project analysis
+Text ranking, symbol lookup, project analysis, audit, or relation scoring
     |
     v
 Terminal report
@@ -30,18 +30,21 @@ A search scans the selected repository and builds an index in memory. Persistent
 
 ## Modules
 
-| File                | Responsibility                                                                                        |
-| ------------------- | ----------------------------------------------------------------------------------------------------- |
-| `src/main.rs`       | Parses arguments, dispatches commands, and writes rendered reports.                                   |
-| `src/cli.rs`        | Defines the `index`, `search`, `symbol`, and `overview` commands with Clap.                           |
-| `src/classifier.rs` | Assigns repository roles such as source, documentation, configuration, tests, examples, and metadata. |
-| `src/scanner.rs`    | Walks the repository, filters files and directories, reads UTF-8 content, and invokes the tokenizer.  |
-| `src/tokenizer.rs`  | Normalizes prose and technical identifiers into positioned terms.                                     |
-| `src/index.rs`      | Assigns document IDs and owns term postings, corpus statistics, and the shared symbol index.          |
-| `src/search.rs`     | Processes query terms, applies OR or AND matching, ranks documents, and selects snippet lines.        |
-| `src/symbol.rs`     | Parses Rust syntax, extracts symbols, and finds exact definitions and likely text references.         |
-| `src/overview.rs`   | Detects Rust project structure, repository roles, inline tests, and entry-point dependencies.         |
-| `src/terminal.rs`   | Renders startup, help, index, search, symbol, and overview tables with optional ANSI colors.          |
+| File                   | Responsibility                                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| `src/main.rs`          | Parses arguments, dispatches commands, and writes rendered reports.                                   |
+| `src/cli.rs`           | Defines search, symbol, overview, related-file, and documentation-audit commands with Clap.           |
+| `src/classifier.rs`    | Assigns repository roles such as source, documentation, configuration, tests, examples, and metadata. |
+| `src/scanner.rs`       | Walks the repository, filters files and directories, reads UTF-8 content, and invokes the tokenizer.  |
+| `src/tokenizer.rs`     | Normalizes prose and technical identifiers into positioned terms.                                     |
+| `src/index.rs`         | Assigns document IDs and owns term postings, corpus statistics, and the shared symbol index.          |
+| `src/search.rs`        | Processes query terms, applies OR or AND matching, ranks documents, and selects snippet lines.        |
+| `src/symbol.rs`        | Parses Rust syntax, extracts symbols, and finds exact definitions and likely text references.         |
+| `src/overview.rs`      | Detects Rust project structure, repository roles, inline tests, and entry-point dependencies.         |
+| `src/pathing.rs`       | Normalizes repository-relative paths for audit and related-file comparisons.                          |
+| `src/documentation.rs` | Extracts Markdown references and validates them against repository evidence.                          |
+| `src/related.rs`       | Scores likely tests, documentation, callers, and configuration for a selected file.                   |
+| `src/terminal.rs`      | Renders all command reports as bounded tables with optional ANSI colors.                              |
 
 ## Data Model
 
@@ -58,6 +61,10 @@ A search scans the selected repository and builds an index in memory. Persistent
 `SymbolIndex` stores Rust definitions and recoverable parse failures. Each symbol records its name, kind, document, source line, visibility, and optional parent.
 
 `ProjectOverview` stores detected project kind, package name, entry points, core modules, configuration, tests, examples, likely workflow, and an optional Cargo manifest warning.
+
+`DocumentationReference` records a Markdown document, source line, typed reference kind, and value. `AuditFinding` adds a confidence level and unresolved-evidence reason.
+
+`RelatedResult` records a candidate document, score, confidence, matched source symbols, file-name terms, and distinctive shared terms.
 
 `SearchFilters` stores selected categories and extensions, optional path text, and an optional result limit. Category and extension values are normalized before filtering.
 
@@ -91,6 +98,18 @@ Scanned `Cargo.toml` files are parsed as structured TOML. Default and manifest-d
 
 The likely workflow begins with `src/main.rs`, or the first detected entry point, and records direct module roots imported through `crate::...`. This is deterministic structural inference rather than call-graph analysis.
 
+## Documentation Audit
+
+`pulldown-cmark` extracts Markdown link destinations, inline code, and fenced code with source offsets. References are classified as repository paths, Rust symbols or modules, Shun commands or options, and snake-style configuration assignments. Paths resolve from either the repository root or the containing document directory. Symbols use the shared `SymbolIndex`, command metadata comes from Clap, and TOML and JSON keys are parsed structurally.
+
+Unresolved paths, commands, and options have high confidence. Missing exact symbols and modules have medium confidence. Configuration keys have low confidence because prose cannot prove their intended configuration scope. Generated paths and explicitly planned, historical, deprecated-example, or deferred lines are excluded.
+
+## Related Files
+
+Related-file scoring uses non-private, non-generic symbols defined in the selected file, normalized file-name terms, and distinctive shared terms from the inverted index. Symbol matches contribute the strongest factor, followed by file-name terms and inverse-document-frequency-weighted shared terms. Repository-role priors help tests, documentation, and configuration surface without creating matches by themselves.
+
+Results are deterministic, grouped by repository role, and described as likely relationships. They are not compiler-resolved callers or guaranteed test coverage.
+
 ## Planned Changes
 
-Future milestones add related-file discovery, documentation checks, and index persistence. See [Roadmap](roadmap.md) for milestone status.
+Future milestones add index persistence, configurable exclusions, and machine-readable output. See [Roadmap](roadmap.md) for milestone status.

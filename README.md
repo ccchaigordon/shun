@@ -10,7 +10,7 @@ Use Shun to answer questions such as:
 - Which implementation and documentation files relate to the same feature?
 - Does the documentation mention paths, commands, options, or symbols that no longer exist?
 
-Shun currently supports repository scanning, file classification, technical identifier tokenization, in-memory indexing, BM25 ranking, grouped keyword search, Rust symbol lookup, project overviews, and score explanations. Related-file discovery and documentation checks remain planned.
+Shun currently supports repository scanning, file classification, technical identifier tokenization, in-memory indexing, BM25 ranking, grouped keyword search, Rust symbol lookup, project overviews, related-file discovery, documentation audits, and score explanations.
 
 ## Current Status
 
@@ -25,12 +25,15 @@ Available now:
 - Category, extension, path, and result-count filters.
 - Rust symbol extraction with exact definition lookup and likely text references.
 - Project type, entry point, module, configuration, test, example, and workflow summaries.
+- Evidence-ranked related files grouped by repository role.
+- Markdown reference audits for paths, symbols, commands, options, modules, and configuration keys.
+- High, medium, and low confidence levels for potentially stale documentation.
 - Bordered command, argument, and option help tables.
 - Terminal colors with plain redirected output and `NO_COLOR` support.
 
-Persistent storage, related-file discovery, and documentation checks are planned.
+Persistent index storage and machine-readable output are planned.
 
-The `index` command scans repository files, builds an in-memory index, and reports corpus statistics. `search` returns ranked line-aware results, `symbol` finds exact Rust definitions and likely references, and `overview` summarizes repository structure. The index is not persisted yet.
+The `index` command scans repository files, builds an in-memory index, and reports corpus statistics. `search` returns ranked line-aware results, `symbol` finds exact Rust definitions and likely references, `overview` summarizes repository structure, `related` connects a file to likely companions, and `audit-docs` reports potentially stale Markdown references. The index is not persisted yet.
 
 ## Requirements
 
@@ -76,6 +79,13 @@ Find an exact Rust symbol and summarize the current repository:
 ```powershell
 cargo run -- symbol SearchIndex
 cargo run -- overview
+```
+
+Find files related to a source module and audit Markdown references:
+
+```powershell
+cargo run -- related src/index.rs
+cargo run -- audit-docs --confidence high
 ```
 
 `search` scans and indexes the selected repository for each invocation. You do not need to run `index` first. Neither command writes an index file yet.
@@ -140,6 +150,12 @@ Usage: shun [COMMAND]
 | overview  | Summarize project type, entry points,  |
 |           | modules, and repository roles          |
 +-----------+----------------------------------------+
+| related   | Find tests, documentation, callers,    |
+|           | and configuration related to a file    |
++-----------+----------------------------------------+
+| audit-docs| Report potentially stale references in |
+|           | Markdown documentation                 |
++-----------+----------------------------------------+
 | help      | Print this message or the help of the  |
 |           | given subcommand(s)                    |
 +-----------+----------------------------------------+
@@ -154,6 +170,8 @@ cargo run -- index --help
 cargo run -- search --help
 cargo run -- symbol --help
 cargo run -- overview --help
+cargo run -- related --help
+cargo run -- audit-docs --help
 ```
 
 Scan the current repository:
@@ -200,6 +218,8 @@ shun index .
 shun search "search index"
 shun symbol SearchIndex
 shun overview
+shun related src/index.rs
+shun audit-docs --confidence high
 ```
 
 If `shun` is not recognized, ensure `%USERPROFILE%\.cargo\bin` is included in the user `PATH`.
@@ -369,6 +389,39 @@ shun overview
 shun overview --directory "C:\another-folder"
 ```
 
+## Related Files
+
+```text
+shun related [OPTIONS] <PATH>
+```
+
+`related` scores other repository files using references to non-private Rust symbols defined by the selected file, normalized file-name terms, and distinctive shared index terms. Results are grouped as implementation, documentation, configuration, tests, examples, project metadata, and other. Confidence expresses evidence strength rather than compiler-resolved relationships.
+
+```powershell
+shun related src/index.rs
+shun related src/search.rs --limit 10 --directory "C:\another-folder"
+```
+
+The path must be relative to the scanned repository. `--limit` defaults to 20 and applies before terminal grouping.
+
+## Documentation Audit
+
+```text
+shun audit-docs [OPTIONS]
+```
+
+`audit-docs` parses Markdown links, inline code, and fenced code with `pulldown-cmark`. It compares code-like references with scanned repository paths, exact Rust symbols, Clap commands and options, and keys parsed from TOML and JSON. Findings mean potentially stale documentation and require developer review.
+
+High confidence covers unresolved paths, Shun commands, and Shun options. Medium confidence covers unresolved Rust symbols and modules. Low confidence covers conservative snake-style configuration assignments. Generated paths and lines explicitly marked planned, historical, or deferred are ignored to reduce false positives.
+
+```powershell
+shun audit-docs
+shun audit-docs --confidence high
+shun audit-docs --directory "C:\another-folder" --confidence medium
+```
+
+The confidence option is a minimum threshold. `high` reports only high-confidence findings, `medium` includes high and medium, and the default `low` includes all findings.
+
 ## Terminal Display
 
 Startup, command help, and search results use bordered ASCII tables with word-aware wrapping. Colors distinguish headings, paths, categories, scores, and matched terms in an interactive terminal. They are disabled when standard output is redirected, which keeps files and pipelines free of ANSI escape sequences.
@@ -388,7 +441,7 @@ Spacing, separators, labels, and result ordering remain the same with or without
 | Extension                   | Role                       | Current behavior                     |
 | --------------------------- | -------------------------- | ------------------------------------ |
 | `.rs`                       | Rust source and tests      | Tokenized and parsed for symbols.    |
-| `.md`                       | Documentation              | Read as UTF-8 and tokenized as text. |
+| `.md`                       | Documentation              | Tokenized and parsed for references. |
 | `.txt`                      | Documentation or notes     | Read as UTF-8 and tokenized as text. |
 | `.toml`                     | Configuration and metadata | Read as UTF-8 and tokenized as text. |
 | `.json`                     | Configuration and metadata | Read as UTF-8 and tokenized as text. |
@@ -490,8 +543,8 @@ Recoverable errors are printed to standard error and scanning continues. One pro
 | `shun search [options] <query>` | Search and filter repository files.                           | Implemented. |
 | `shun symbol <name>`            | Find a Rust symbol definition and likely references.          | Implemented. |
 | `shun overview`                 | Summarize project structure and likely workflow.              | Implemented. |
-| `shun related <path>`           | Find likely tests, documentation, callers, and configuration. | Planned.     |
-| `shun audit-docs`               | Report potentially stale documentation references.            | Planned.     |
+| `shun related <path>`           | Find likely tests, documentation, callers, and configuration. | Implemented. |
+| `shun audit-docs`               | Report potentially stale documentation references.            | Implemented. |
 | `shun stats`                    | Display index and category statistics.                        | Planned.     |
 | `shun clear`                    | Remove persisted index data.                                  | Planned.     |
 
@@ -515,7 +568,7 @@ Check formatting:
 cargo fmt -- --check
 ```
 
-Tests cover CLI parsing, help routing, filtering, classification, tokenization, source locations, scanning, indexing, BM25 ranking, boosts, grouping, snippets, Rust symbols, likely references, project overview detection, terminal reports, count formatting, and color checks. Future tests will cover documentation checks.
+Tests cover CLI parsing, help routing, filtering, classification, tokenization, source locations, scanning, indexing, BM25 ranking, boosts, grouping, snippets, Rust symbols, likely references, project overview detection, documentation audits, related-file ranking, terminal reports, count formatting, and color checks.
 
 A normal local verification sequence is:
 

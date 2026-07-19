@@ -40,17 +40,19 @@ The workflow verifies formatting, Clippy warnings, and the full test suite with 
 
 ## Dependencies
 
-| Crate         | Purpose                                    |
-| ------------- | ------------------------------------------ |
-| `anyhow`      | Application errors and context.            |
-| `clap`        | CLI parsing and generated help.            |
-| `proc-macro2` | Rust syntax span line locations.           |
-| `syn`         | Rust syntax parsing and symbol extraction. |
-| `term-table`  | Bordered terminal report tables.           |
-| `textwrap`    | Word-aware snippet wrapping.               |
-| `toml`        | Structured Cargo manifest parsing.         |
-| `walkdir`     | Repository traversal.                      |
-| `tempfile`    | Temporary repository fixtures in tests.    |
+| Crate            | Purpose                                    |
+| ---------------- | ------------------------------------------ |
+| `anyhow`         | Application errors and context.            |
+| `clap`           | CLI parsing and generated help.            |
+| `proc-macro2`    | Rust syntax span line locations.           |
+| `pulldown-cmark` | Structured Markdown event parsing.         |
+| `serde_json`     | Structured JSON configuration parsing.     |
+| `syn`            | Rust syntax parsing and symbol extraction. |
+| `term-table`     | Bordered terminal report tables.           |
+| `textwrap`       | Word-aware snippet wrapping.               |
+| `toml`           | Structured Cargo manifest parsing.         |
+| `walkdir`        | Repository traversal.                      |
+| `tempfile`       | Temporary repository fixtures in tests.    |
 
 Add a dependency only when the milestone that needs it begins.
 
