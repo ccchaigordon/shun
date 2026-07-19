@@ -32,6 +32,8 @@ cargo test --locked --all-features
 
 For command changes, also run the affected command against this repository and inspect its plain output.
 
+For persistence or output changes, use a temporary repository to exercise `index`, a saved-index read, `stats`, and two `clear` calls. Parse every `--format json` response rather than checking text fragments, and verify that saved reads remain stable until reindexing or clearing.
+
 ## Continuous Integration
 
 Pull requests into `main` run the `Rust validation` workflow. Branch protection should require that check before merge.
@@ -40,19 +42,20 @@ The workflow verifies formatting, Clippy warnings, and the full test suite with 
 
 ## Dependencies
 
-| Crate            | Purpose                                    |
-| ---------------- | ------------------------------------------ |
-| `anyhow`         | Application errors and context.            |
-| `clap`           | CLI parsing and generated help.            |
-| `proc-macro2`    | Rust syntax span line locations.           |
-| `pulldown-cmark` | Structured Markdown event parsing.         |
-| `serde_json`     | Structured JSON configuration parsing.     |
-| `syn`            | Rust syntax parsing and symbol extraction. |
-| `term-table`     | Bordered terminal report tables.           |
-| `textwrap`       | Word-aware snippet wrapping.               |
-| `toml`           | Structured Cargo manifest parsing.         |
-| `walkdir`        | Repository traversal.                      |
-| `tempfile`       | Temporary repository fixtures in tests.    |
+| Crate            | Purpose                                     |
+| ---------------- | ------------------------------------------- |
+| `anyhow`         | Application errors and context.             |
+| `clap`           | CLI parsing and generated help.             |
+| `proc-macro2`    | Rust syntax span line locations.            |
+| `pulldown-cmark` | Structured Markdown event parsing.          |
+| `serde`          | Snapshot serialization and deserialization. |
+| `serde_json`     | Snapshot storage and structured CLI output. |
+| `syn`            | Rust syntax parsing and symbol extraction.  |
+| `term-table`     | Bordered terminal report tables.            |
+| `textwrap`       | Word-aware snippet wrapping.                |
+| `toml`           | Structured Cargo manifest parsing.          |
+| `walkdir`        | Repository traversal.                       |
+| `tempfile`       | Temporary repository fixtures in tests.     |
 
 Add a dependency only when the milestone that needs it begins.
 
@@ -60,4 +63,4 @@ Add a dependency only when the milestone that needs it begins.
 
 Keep `README.md` focused on setup and command use. Put implementation notes in `docs/architecture.md` and the maintainer process here.
 
-Update terminal examples when command labels or report fields change.
+Update terminal examples when command labels or report fields change. Keep snapshot version changes explicit in `src/storage.rs`, document migration behavior, and add round-trip coverage before changing the serialized shape.

@@ -1,6 +1,8 @@
 # Shun
 
-Shun is a Rust command-line tool for indexing and searching source code, documentation, configuration, tests, and project metadata.
+Shun is a local Rust CLI for searching software repositories and catching documentation that no longer matches the code.
+
+It indexes source code, tests, configuration, documentation, and project metadata using deterministic and explainable retrieval.
 
 Use Shun to answer questions such as:
 
@@ -10,7 +12,31 @@ Use Shun to answer questions such as:
 - Which implementation and documentation files relate to the same feature?
 - Does the documentation mention paths, commands, options, or symbols that no longer exist?
 
-Shun currently supports repository scanning, file classification, technical identifier tokenization, in-memory indexing, BM25 ranking, grouped keyword search, Rust symbol lookup, project overviews, related-file discovery, documentation audits, and score explanations.
+## Terminal Demo
+
+This abbreviated plain-output recording shows the current deterministic command surface. The audit excerpt uses an isolated fixture containing an intentionally stale link.
+
+```text
+$ shun search "snapshot validation" --limit 1 --no-color
+SEARCH RESULTS (1 match)
+DOCUMENTATION (1)
+#1  docs\maintainer-guide.md  Line 12
+Category: Documentation  Score: 4.527
+Matches  snapshot, validation
+Factors: BM25 4.277 + category 0.250
+
+$ shun symbol SearchIndex --no-color
+DEFINITIONS (2)
+src\index.rs  Line 42  Struct          Visibility: crate
+src\index.rs  Line 57  Implementation  Visibility: private
+
+$ shun audit-docs --confidence high --no-color
+POTENTIALLY STALE DOCUMENTATION (1)
+High confidence  README.md:2  File path
+No matching repository path exists
+```
+
+Shun currently supports repository scanning, file classification, technical identifier tokenization, persistent indexing, BM25 ranking, grouped keyword search, Rust symbol lookup, project overviews, related-file discovery, documentation audits, score explanations, and structured JSON output.
 
 ## Current Status
 
@@ -18,7 +44,7 @@ Available now:
 
 - Recursive scanning of `.rs`, `.md`, `.txt`, `.toml`, and `.json` files.
 - File classification and technical identifier tokenization.
-- An in-memory inverted index with source positions and line numbers.
+- A versioned repository snapshot with source positions and line numbers.
 - Multi-keyword search with OR matching and optional `--match-all` behavior.
 - BM25 ranking with file-name, path, and category boosts.
 - Results grouped by repository role with score factors and source-line snippets.
@@ -30,10 +56,58 @@ Available now:
 - High, medium, and low confidence levels for potentially stale documentation.
 - Bordered command, argument, and option help tables.
 - Terminal colors with plain redirected output and `NO_COLOR` support.
+- Configurable directory exclusions from the command line and a repository configuration file.
+- Saved-index statistics, clearing, and command-specific JSON reports.
 
-Persistent index storage and machine-readable output are planned.
+The original repository-search and documentation-audit scope is feature-complete and provides a usable first release. Future work will focus on improving retrieval quality and repository understanding rather than expanding the command surface without a clear use case.
 
-The `index` command scans repository files, builds an in-memory index, and reports corpus statistics. `search` returns ranked line-aware results, `symbol` finds exact Rust definitions and likely references, `overview` summarizes repository structure, `related` connects a file to likely companions, and `audit-docs` reports potentially stale Markdown references. The index is not persisted yet.
+The `index` command scans repository files, writes a versioned snapshot under `.shun`, and reports corpus statistics. Repository commands load that snapshot when it exists, or scan the current files when it does not. `search` returns ranked line-aware results, `symbol` finds exact Rust definitions and likely references, `overview` summarizes repository structure, `related` connects a file to likely companions, and `audit-docs` reports potentially stale Markdown references.
+
+## Future Direction
+
+Shun's next major retrieval milestone is optional semantic search over repository chunks. Semantic search is planned and is not available in the current command interface.
+
+The current BM25, symbol, path, category, and structural signals remain the trusted retrieval core. Semantic retrieval is intended to improve conceptual queries where relevant code or documentation uses different wording from the user's query.
+
+Examples include:
+
+- Searching for "where requests are prevented from hanging" when the repository uses terms such as `deadline`, `timeout`, or `elapsed`.
+- Finding documentation related to a module after its terminology or file name has changed.
+- Improving related-file suggestions when exact symbols and shared terms provide limited evidence.
+
+Semantic retrieval will not replace exact symbol lookup, deterministic documentation audits, or BM25 keyword search. It will be introduced as an optional retrieval mode and evaluated against the existing search engine.
+
+A future search interface may support these planned modes:
+
+| Mode       | Purpose                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------- |
+| `keyword`  | Existing BM25 and structural retrieval for exact technical terms.                      |
+| `semantic` | Meaning-based retrieval over source-aware repository chunks.                           |
+| `hybrid`   | Rank fusion across keyword and semantic candidates while preserving structural boosts. |
+
+### AI and ML Positioning
+
+Shun is not intended to become a generic coding chatbot. Its role is to retrieve, rank, validate, and expose local repository evidence through deterministic, explainable, and CI-friendly workflows.
+
+Future AI-assisted features may use Shun as a local retrieval layer:
+
+```text
+Developer question
+    |
+    v
+Keyword and semantic retrieval
+    |
+    v
+Relevant code, tests, configuration, and documentation
+    |
+    v
+Optional model-generated explanation
+    |
+    v
+File and line evidence
+```
+
+Any generated answer should remain optional and cite the repository evidence used to produce it. Fully local, non-AI search and validation will remain available.
 
 ## Requirements
 
@@ -56,7 +130,7 @@ From the crate directory, run Shun without a command to see its startup screen a
 cargo run
 ```
 
-Build an in-memory index report for the current repository:
+Build and save an index for the current repository:
 
 ```powershell
 cargo run -- index .
@@ -88,13 +162,15 @@ cargo run -- related src/index.rs
 cargo run -- audit-docs --confidence high
 ```
 
-`search` scans and indexes the selected repository for each invocation. You do not need to run `index` first. Neither command writes an index file yet.
+You do not need to run `index` first: repository commands scan when no snapshot exists. After `index` saves a snapshot, commands use that exact content until the next `index` or `clear` invocation. Use `--format json` for structured output and `--no-color` to force plain human-readable output.
 
 ## Project Documentation
 
 - [Architecture](docs/architecture.md) describes the modules, data flow, index, and query model.
 - [Maintainer Guide](docs/maintainer-guide.md) records the maintenance and validation workflow.
 - [Roadmap](docs/roadmap.md) tracks completed and planned milestones.
+
+As the reference material grows, detailed ranking, configuration, output-format, and tokenization guidance will move into focused documents so this README remains a concise project overview and quick start.
 
 ## Building
 
@@ -133,12 +209,12 @@ Search code and documentation.
 ------------------------------------------------------------
 Search repository files and check documentation references
 
-Usage: shun [COMMAND]
+Usage: shun [OPTIONS] [COMMAND]
 
 +----------------------------------------------------+
 |                      COMMANDS                      |
 +-----------+----------------------------------------+
-| index     | Build an in-memory index and report    |
+| index     | Build and save an index, then report   |
 |           | repository statistics                  |
 +-----------+----------------------------------------+
 | search    | Search repository content with         |
@@ -156,6 +232,12 @@ Usage: shun [COMMAND]
 | audit-docs| Report potentially stale references in |
 |           | Markdown documentation                 |
 +-----------+----------------------------------------+
+| stats     | Display statistics from a saved        |
+|           | repository index                       |
++-----------+----------------------------------------+
+| clear     | Remove saved index data from a         |
+|           | repository                             |
++-----------+----------------------------------------+
 | help      | Print this message or the help of the  |
 |           | given subcommand(s)                    |
 +-----------+----------------------------------------+
@@ -172,6 +254,8 @@ cargo run -- symbol --help
 cargo run -- overview --help
 cargo run -- related --help
 cargo run -- audit-docs --help
+cargo run -- stats --help
+cargo run -- clear --help
 ```
 
 Scan the current repository:
@@ -186,6 +270,12 @@ Scan another repository:
 cargo run -- index "C:\another-folder"
 ```
 
+Exclude directory names while indexing. Repeat `--exclude` or use commas:
+
+```powershell
+cargo run -- index . --exclude fixtures,vendor --exclude generated
+```
+
 Search the current repository with default OR matching:
 
 ```powershell
@@ -196,6 +286,14 @@ Require every source query token and search another repository:
 
 ```powershell
 cargo run -- search "database timeout" --match-all --directory "C:\another-folder"
+```
+
+Read the saved index as JSON, force plain human output, or remove it:
+
+```powershell
+cargo run -- stats --format json
+cargo run -- search "database timeout" --no-color
+cargo run -- clear
 ```
 
 Run the built executable directly:
@@ -277,7 +375,9 @@ Token counts change as source and documentation evolve.
 shun search [OPTIONS] <QUERY>
 ```
 
-The command scans and indexes the selected repository in memory for each invocation. The directory defaults to the current directory. When the selected path is `.`, reports display its absolute path. Query text uses the same developer-aware normalization as indexed content, including complete technical identifiers and their snake-case, camel-case, acronym, and kebab-case components.
+The command searches the selected repository using a saved snapshot when one exists. If no snapshot is available, Shun scans and indexes the repository in memory for that invocation. The directory defaults to the current directory. When the selected path is `.`, reports display its absolute path. Query text uses the same developer-aware normalization as indexed content, including complete technical identifiers and their snake-case, camel-case, acronym, and kebab-case components.
+
+Saved snapshots are explicit and may become stale after repository files change. Run `shun index .` to replace the snapshot or `shun clear` to remove it; read-only commands do not refresh it automatically.
 
 Default OR mode returns a document when any source query token matches. `--match-all` requires every source query token, while normalized variants from one identifier remain alternatives within that token. Results use BM25 with file-name, parent-path, category, and exact-symbol boosts. They are grouped by repository role and ordered by score within each group, with repository path used to break ties.
 
@@ -464,11 +564,30 @@ build
 coverage
 .idea
 .vscode
+.shun
 ```
 
-This prevents generated output, dependency caches, version-control internals, coverage reports, and editor settings from polluting search results.
+This prevents generated output, dependency caches, version-control internals, coverage reports, editor settings, and Shun's own snapshot from polluting search results.
 
-Planned improvements include `.gitignore`-aware traversal, configurable exclusions, and a `.shunignore` file.
+Add repository-specific directory names in a root-level **.shun.toml** file:
+
+```toml
+exclude = ["vendor", "generated"]
+```
+
+The `index --exclude` option adds one or more names for that indexing run. Built-in, configured, and command-line exclusions are merged and stored in the snapshot. Values match directory names at any depth. File patterns and `.gitignore` semantics are not supported.
+
+## Saved Indexes
+
+`shun index <path>` writes pretty JSON to the selected repository's **.shun/index.json** location. The versioned snapshot contains the canonical repository path, indexing time, active exclusions, and scanned documents. Derived postings and symbol data are rebuilt in memory when the snapshot is loaded.
+
+Snapshots are explicit and may become stale when repository files change. Run `index` again to replace one or use `clear` to remove it. `stats` requires an existing snapshot. Shun does not silently refresh or mutate a snapshot from read-only commands.
+
+## Automation
+
+Global `--format human|json` selects terminal reports or command-specific structured JSON. JSON is written as one valid document with a trailing newline and never contains ANSI escape sequences. Global `--no-color` disables ANSI colors in human output; redirected output and the `NO_COLOR` environment variable remain supported.
+
+These global options may appear before or after the subcommand. Errors continue to use standard error and a nonzero process exit status, so scripts should check both the exit code and the JSON payload from successful commands.
 
 ## Tokenization
 
@@ -539,14 +658,14 @@ Recoverable errors are printed to standard error and scanning continues. One pro
 
 | Command                         | Purpose                                                       | Status       |
 | ------------------------------- | ------------------------------------------------------------- | ------------ |
-| `shun index <path>`             | Scan a repository and report index statistics.                | Implemented. |
+| `shun index <path>`             | Scan a repository, save its snapshot, and report statistics.  | Implemented. |
 | `shun search [options] <query>` | Search and filter repository files.                           | Implemented. |
 | `shun symbol <name>`            | Find a Rust symbol definition and likely references.          | Implemented. |
 | `shun overview`                 | Summarize project structure and likely workflow.              | Implemented. |
 | `shun related <path>`           | Find likely tests, documentation, callers, and configuration. | Implemented. |
 | `shun audit-docs`               | Report potentially stale documentation references.            | Implemented. |
-| `shun stats`                    | Display index and category statistics.                        | Planned.     |
-| `shun clear`                    | Remove persisted index data.                                  | Planned.     |
+| `shun stats`                    | Display index and category statistics.                        | Implemented. |
+| `shun clear`                    | Remove persisted index data.                                  | Implemented. |
 
 ## Testing
 
@@ -580,4 +699,4 @@ cargo test --locked --all-features
 
 ## License
 
-No license file is currently present. Will add one before distributing Shun.
+Shun is available under the [MIT License](LICENSE). See [Contributing](CONTRIBUTING.md) for contribution expectations and the [Security Policy](SECURITY.md) for private vulnerability reporting.

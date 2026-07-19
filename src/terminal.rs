@@ -27,6 +27,7 @@ use crate::overview::ProjectOverview;
 use crate::related::RelatedFiles;
 use crate::scanner::ScannedDocument;
 use crate::search::{MatchMode, SearchFilters, SearchResult, snippet_for};
+use crate::storage::IndexSnapshot;
 use crate::symbol::SymbolLookup;
 use crate::tokenizer::tokenize;
 
@@ -200,81 +201,162 @@ fn render_help_table(title: &str, entries: &[(String, String)], color: bool) -> 
 /// Parameters: directory identifies the repository, index contains documents and statistics,
 /// and color controls ANSI styling.
 /// Returns: A complete report ending in one newline.
-pub(crate) fn render_index(directory: &Path, index: &SearchIndex, color: bool) -> String {
-    let id_width = index
-        .documents
-        .last()
-        .map_or(2, |document| document.id.to_string().len().max(2));
-    let path_width = index
-        .documents
-        .iter()
-        .map(|document| document.relative_path.display().to_string().chars().count())
-        .max()
-        .unwrap_or(4)
-        .max(4);
-    let category_width = index
-        .documents
-        .iter()
-        .map(|document| document.category.to_string().chars().count())
-        .max()
-        .unwrap_or(8)
-        .max(8);
-    let token_width = index
-        .documents
-        .iter()
-        .map(|document| format_count(document.token_count).len())
-        .max()
-        .unwrap_or(6)
-        .max(6);
-    let table_width = id_width + path_width + category_width + token_width + 8;
-    let separator = "-".repeat(table_width.max(SEPARATOR.len()));
-
+pub(crate) fn render_index(
+    directory: &Path,
+    index: &SearchIndex,
+    saved_path: Option<&Path>,
+    color: bool,
+) -> String {
     let mut output = String::new();
     push_heading(&mut output, "INDEX", color);
     output.push_str("Repository  ");
     output.push_str(&paint(&directory.display().to_string(), CYAN, color));
     output.push('\n');
-    output.push_str(&paint(&separator, DIM, color));
-    output.push('\n');
-    output.push_str(&format!(
-        "  {:>id_width$}  {:<path_width$}  {:<category_width$}  {:>token_width$}\n",
-        "ID", "PATH", "CATEGORY", "TOKENS"
-    ));
-    output.push_str(&paint(&separator, DIM, color));
-    output.push('\n');
-
-    for document in &index.documents {
-        let id = format!("{:>id_width$}", document.id);
-        let path = format!(
-            "{:<path_width$}",
-            document.relative_path.display().to_string()
-        );
-        let category = format!("{:<category_width$}", document.category);
-        let tokens = format!("{:>token_width$}", format_count(document.token_count));
-
-        output.push_str("  ");
-        output.push_str(&paint(&id, DIM, color));
-        output.push_str("  ");
-        output.push_str(&paint(&path, CYAN, color));
-        output.push_str("  ");
-        output.push_str(&paint(&category, YELLOW, color));
-        output.push_str("  ");
-        output.push_str(&paint(&tokens, GREEN, color));
+    if let Some(path) = saved_path {
+        output.push_str("Saved       ");
+        output.push_str(&paint(&path.display().to_string(), CYAN, color));
         output.push('\n');
     }
+    output.push_str(&paint(SEPARATOR, DIM, color));
+    output.push('\n');
+    output.push('\n');
 
-    output.push_str(&paint(&separator, DIM, color));
+    let mut document_rows = vec![Row::new(vec![
+        TableCell::builder(paint(
+            &format!("DOCUMENTS ({})", format_count(index.documents.len())),
+            BOLD_CYAN,
+            color,
+        ))
+        .col_span(4)
+        .alignment(Alignment::Center)
+        .build(),
+    ])];
+    document_rows.push(Row::new(vec![
+        TableCell::builder(paint("ID", DIM, color))
+            .alignment(Alignment::Right)
+            .build(),
+        TableCell::builder(paint("PATH", DIM, color)).build(),
+        TableCell::builder(paint("CATEGORY", DIM, color)).build(),
+        TableCell::builder(paint("TOKENS", DIM, color))
+            .alignment(Alignment::Right)
+            .build(),
+    ]));
+    for document in &index.documents {
+        document_rows.push(Row::without_separator(vec![
+            TableCell::builder(paint(&document.id.to_string(), DIM, color))
+                .alignment(Alignment::Right)
+                .build(),
+            TableCell::builder(paint(
+                &document.relative_path.display().to_string(),
+                CYAN,
+                color,
+            ))
+            .build(),
+            TableCell::builder(paint(&document.category.to_string(), YELLOW, color)).build(),
+            TableCell::builder(paint(&format_count(document.token_count), GREEN, color))
+                .alignment(Alignment::Right)
+                .build(),
+        ]));
+    }
+    output.push_str(
+        &Table::builder()
+            .max_column_width(SEARCH_TABLE_COLUMN_WIDTH)
+            .style(TableStyle::simple())
+            .rows(document_rows)
+            .build()
+            .render(),
+    );
+    output.push('\n');
+
+    let mut summary_rows = vec![Row::new(vec![
+        TableCell::builder(paint("SUMMARY", BOLD_CYAN, color))
+            .col_span(2)
+            .alignment(Alignment::Center)
+            .build(),
+    ])];
+    for (label, value) in [
+        ("Files", format_count(index.documents.len())),
+        ("Unique terms", format_count(index.document_frequency.len())),
+        ("Posting entries", format_count(posting_entry_count(index))),
+        ("Source tokens", format_count(index.total_token_count)),
+        (
+            "Average length",
+            format!("{:.2} tokens", index.average_document_length),
+        ),
+    ] {
+        summary_rows.push(Row::without_separator(vec![
+            TableCell::builder(label).build(),
+            TableCell::builder(paint(&value, GREEN, color))
+                .alignment(Alignment::Right)
+                .build(),
+        ]));
+    }
+    summary_rows.push(Row::new(vec![
+        TableCell::builder(paint("BY CATEGORY", BOLD_CYAN, color))
+            .col_span(2)
+            .alignment(Alignment::Center)
+            .build(),
+    ]));
+    for category in FileCategory::ALL {
+        let count = index
+            .documents
+            .iter()
+            .filter(|document| document.category == category)
+            .count();
+        if count > 0 {
+            summary_rows.push(Row::without_separator(vec![
+                TableCell::builder(category.to_string()).build(),
+                TableCell::builder(paint(&format_count(count), GREEN, color))
+                    .alignment(Alignment::Right)
+                    .build(),
+            ]));
+        }
+    }
+    output.push_str(
+        &Table::builder()
+            .max_column_width(SEARCH_TABLE_COLUMN_WIDTH)
+            .style(TableStyle::simple())
+            .rows(summary_rows)
+            .build()
+            .render(),
+    );
+
+    output
+}
+
+pub(crate) fn render_stats(
+    directory: &Path,
+    snapshot: &IndexSnapshot,
+    index: &SearchIndex,
+    color: bool,
+) -> String {
+    let mut output = String::new();
+    push_heading(&mut output, "STATS", color);
+    output.push_str("Repository  ");
+    output.push_str(&paint(&directory.display().to_string(), CYAN, color));
+    output.push('\n');
+    output.push_str("Indexed     ");
+    output.push_str(&paint(
+        &format!("Unix timestamp {}", snapshot.indexed_at_unix_seconds),
+        CYAN,
+        color,
+    ));
+    output.push('\n');
+    output.push_str("Exclusions  ");
+    output.push_str(&paint(&snapshot.exclusions.join(", "), DIM, color));
+    output.push('\n');
+    output.push_str(&paint(SEPARATOR, DIM, color));
     output.push('\n');
     push_heading(&mut output, "SUMMARY", color);
     push_metric(&mut output, "Files", index.documents.len(), color);
+    push_metric(&mut output, "Symbols", index.symbols.symbols.len(), color);
+    push_metric(&mut output, "Unique terms", index.postings.len(), color);
     push_metric(
         &mut output,
-        "Unique terms",
-        index.document_frequency.len(),
+        "Posting entries",
+        posting_entry_count(index),
         color,
     );
-    let posting_count: usize = index.postings.values().map(Vec::len).sum();
-    push_metric(&mut output, "Posting entries", posting_count, color);
     push_metric(&mut output, "Source tokens", index.total_token_count, color);
     output.push_str(&format!(
         "  {:<18} {}\n",
@@ -285,8 +367,6 @@ pub(crate) fn render_index(directory: &Path, index: &SearchIndex, color: bool) -
             color
         )
     ));
-
-    output.push('\n');
     push_heading(&mut output, "BY CATEGORY", color);
     for category in FileCategory::ALL {
         let count = index
@@ -295,15 +375,28 @@ pub(crate) fn render_index(directory: &Path, index: &SearchIndex, color: bool) -
             .filter(|document| document.category == category)
             .count();
         if count > 0 {
-            output.push_str(&format!(
-                "  {:<18} {}\n",
-                category,
-                paint(&format_count(count), GREEN, color)
-            ));
+            push_metric(&mut output, &category.to_string(), count, color);
         }
     }
-
     output
+}
+
+pub(crate) fn render_clear(directory: &Path, removed: bool, color: bool) -> String {
+    let mut output = String::new();
+    push_heading(&mut output, "CLEAR", color);
+    output.push_str("Repository  ");
+    output.push_str(&paint(&directory.display().to_string(), CYAN, color));
+    output.push('\n');
+    output.push_str(if removed {
+        "Saved index removed.\n"
+    } else {
+        "No saved index found.\n"
+    });
+    output
+}
+
+fn posting_entry_count(index: &SearchIndex) -> usize {
+    index.postings.values().map(Vec::len).sum()
 }
 
 pub(crate) fn render_symbol(
@@ -1202,7 +1295,7 @@ mod tests {
         assert!(output.starts_with(BANNER));
         assert!(output.contains("Search code and documentation."));
         assert!(output.contains(SEPARATOR));
-        assert!(output.contains("Usage: shun [COMMAND]"));
+        assert!(output.contains("Usage: shun [OPTIONS] [COMMAND]"));
         assert!(output.contains("COMMANDS"));
         assert!(output.contains("| index"));
         assert!(output.contains("| search"));
@@ -1252,15 +1345,52 @@ mod tests {
         let documents = vec![scanned_document("src/main.rs", "search index")];
         let index = SearchIndex::build(&documents);
 
-        let output = render_index(Path::new("."), &index, false);
+        let output = render_index(Path::new("."), &index, None, false);
 
         assert!(output.starts_with("INDEX\nRepository  .\n"));
-        assert!(output.contains("ID  PATH"));
+        assert!(output.contains("DOCUMENTS (1)"));
+        assert!(output.contains("|  ID | PATH"));
         assert!(output.contains("src/main.rs"));
-        assert!(output.contains("SUMMARY\n"));
+        assert!(output.contains("SUMMARY"));
         assert!(output.contains("Unique terms"));
-        assert!(output.contains("BY CATEGORY\n"));
+        assert!(output.contains("BY CATEGORY"));
+        assert!(output.lines().all(|line| line.chars().count() <= 83));
         assert!(!output.contains("\x1b["));
+    }
+
+    #[test]
+    fn renders_persistence_stats_and_clear_reports() {
+        let documents = vec![scanned_document("src/main.rs", "search index")];
+        let index = SearchIndex::build(&documents);
+        let snapshot = IndexSnapshot {
+            version: 1,
+            repository: PathBuf::from("."),
+            indexed_at_unix_seconds: 1_700_000_000,
+            exclusions: vec![".git".to_owned(), "target".to_owned()],
+            documents,
+        };
+
+        let index_output = render_index(
+            Path::new("."),
+            &index,
+            Some(Path::new(".shun/index.json")),
+            false,
+        );
+        let stats_output = render_stats(Path::new("."), &snapshot, &index, false);
+        let removed_output = render_clear(Path::new("."), true, false);
+        let empty_output = render_clear(Path::new("."), false, false);
+
+        assert!(index_output.contains("Saved       .shun/index.json"));
+        assert!(stats_output.starts_with("STATS\nRepository  ."));
+        assert!(stats_output.contains("Unix timestamp 1700000000"));
+        assert!(stats_output.contains("Exclusions  .git, target"));
+        assert!(stats_output.contains("Symbols"));
+        assert!(removed_output.contains("Saved index removed."));
+        assert!(empty_output.contains("No saved index found."));
+        for output in [index_output, stats_output, removed_output, empty_output] {
+            assert!(!output.contains("\x1b["));
+            assert!(output.lines().all(|line| line.chars().count() <= 83));
+        }
     }
 
     #[test]

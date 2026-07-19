@@ -14,7 +14,9 @@
  */
 
 /// This represents one searchable term generated from a source token.
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Token {
     pub(crate) term: String,
     pub(crate) position: usize,
@@ -22,7 +24,7 @@ pub(crate) struct Token {
 }
 
 /// This contains expanded searchable terms and the unexpanded document length.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TokenizedText {
     pub(crate) tokens: Vec<Token>,
     pub(crate) source_token_count: usize,

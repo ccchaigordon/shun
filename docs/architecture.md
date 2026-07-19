@@ -17,23 +17,25 @@ File classification
 Tokenization
     |
     v
-In-memory inverted index
+Versioned snapshot and in-memory inverted index
     |
     v
 Text ranking, symbol lookup, project analysis, audit, or relation scoring
     |
     v
-Terminal report
+Human terminal report or structured JSON
 ```
 
-A search scans the selected repository and builds an index in memory. Persistent index storage is planned for a later milestone.
+The current retrieval path is lexical and structural. It combines developer-aware tokenization, an inverted index, BM25, file and path boosts, category priors, and exact Rust symbol boosts.
+
+`index` scans the selected repository and writes a versioned snapshot. Repository commands load saved documents and rebuild derived index structures in memory, or scan directly when no snapshot exists.
 
 ## Modules
 
 | File                   | Responsibility                                                                                        |
 | ---------------------- | ----------------------------------------------------------------------------------------------------- |
-| `src/main.rs`          | Parses arguments, dispatches commands, and writes rendered reports.                                   |
-| `src/cli.rs`           | Defines search, symbol, overview, related-file, and documentation-audit commands with Clap.           |
+| `src/main.rs`          | Parses arguments, loads or scans documents, dispatches commands, and selects an output format.        |
+| `src/cli.rs`           | Defines repository, lifecycle, exclusion, and global output controls with Clap.                       |
 | `src/classifier.rs`    | Assigns repository roles such as source, documentation, configuration, tests, examples, and metadata. |
 | `src/scanner.rs`       | Walks the repository, filters files and directories, reads UTF-8 content, and invokes the tokenizer.  |
 | `src/tokenizer.rs`     | Normalizes prose and technical identifiers into positioned terms.                                     |
@@ -45,6 +47,8 @@ A search scans the selected repository and builds an index in memory. Persistent
 | `src/documentation.rs` | Extracts Markdown references and validates them against repository evidence.                          |
 | `src/related.rs`       | Scores likely tests, documentation, callers, and configuration for a selected file.                   |
 | `src/terminal.rs`      | Renders all command reports as bounded tables with optional ANSI colors.                              |
+| `src/json_output.rs`   | Builds command-specific structured JSON values for non-interactive consumers.                         |
+| `src/storage.rs`       | Saves, validates, loads, and removes versioned repository snapshots under `.shun`.                    |
 
 ## Data Model
 
@@ -67,6 +71,20 @@ A search scans the selected repository and builds an index in memory. Persistent
 `RelatedResult` records a candidate document, score, confidence, matched source symbols, file-name terms, and distinctive shared terms.
 
 `SearchFilters` stores selected categories and extensions, optional path text, and an optional result limit. Category and extension values are normalized before filtering.
+
+`IndexSnapshot` stores a format version, canonical repository path, Unix timestamp, merged directory exclusions, and scanned documents. Derived postings and symbols are rebuilt rather than serialized twice.
+
+## Persistence and Exclusions
+
+Snapshots use pretty JSON at the selected repository's **.shun/index.json** location. Saving first creates `.shun` and then replaces the snapshot. Loading rejects unsupported format versions and repository-path mismatches. Clearing removes the file and its now-empty storage directory.
+
+The scanner merges built-in directory names, the optional root `.shun.toml` `exclude` array, and repeatable or comma-delimited `index --exclude` values. Directory names match at any depth. `.shun` is always excluded so an index cannot ingest itself.
+
+Read-oriented commands prefer a saved snapshot for deterministic and fast repeated work. Snapshots intentionally do not track file-system mutations; explicit `index` and `clear` commands own that lifecycle.
+
+## Output Boundary
+
+Command computation is shared by both output modes. `terminal.rs` owns bounded human-readable reports and ANSI color policy. `json_output.rs` owns structured values and includes a command discriminator, repository context, summary data, and command-specific results. `main.rs` pretty-serializes one JSON document with a trailing newline. JSON mode always disables ANSI rendering.
 
 ## Query Processing
 
@@ -110,6 +128,107 @@ Related-file scoring uses non-private, non-generic symbols defined in the select
 
 Results are deterministic, grouped by repository role, and described as likely relationships. They are not compiler-resolved callers or guaranteed test coverage.
 
-## Planned Changes
+## Future Semantic Retrieval Architecture
 
-Future milestones add index persistence, configurable exclusions, and machine-readable output. See [Roadmap](roadmap.md) for milestone status.
+Semantic retrieval is planned as an optional secondary retrieval path rather than a replacement for the current index. It is not implemented in the current architecture.
+
+```text
+Repository
+    |
+    v
+Source-aware chunk extraction
+    |
+    v
+Local embedding generation
+    |
+    v
+Persisted chunk vectors
+    |
+    +-------------------------------+
+    |                               |
+    v                               v
+BM25 and structural retrieval   Semantic retrieval
+    |                               |
+    +---------------+---------------+
+                    |
+                    v
+              Rank fusion
+                    |
+                    v
+        Existing structural boosts
+                    |
+                    v
+        Human or structured output
+```
+
+### Planned Chunk Model
+
+Semantic retrieval requires source-aware chunks because whole-file embeddings are too broad and large files often contain unrelated concepts. Line-aware chunks preserve useful evidence while retaining access to existing file-level paths, categories, and document metadata.
+
+A proposed conceptual model is:
+
+```rust
+struct RepositoryChunk {
+    id: ChunkId,
+    document_id: DocumentId,
+    kind: ChunkKind,
+    start_line: usize,
+    end_line: usize,
+    content: String,
+}
+```
+
+Likely chunk types include:
+
+- Rust functions.
+- Rust structs, enums, and traits.
+- `impl` blocks.
+- Markdown heading sections.
+- Configuration objects or tables.
+- Fallback line windows for unsupported structures.
+
+This is a planned retrieval model, not the current serialized snapshot format.
+
+### Shared Retrieval Candidates
+
+Keyword, semantic, and hybrid retrieval could share a candidate representation without requiring their raw scores to use the same scale:
+
+```rust
+struct RetrievalCandidate {
+    document_id: DocumentId,
+    chunk_id: Option<ChunkId>,
+    lexical_score: Option<f64>,
+    semantic_score: Option<f64>,
+    structural_score: f64,
+}
+```
+
+This model would support independent keyword and semantic retrieval, hybrid rank fusion, shared filtering, and shared terminal and JSON output.
+
+### Hybrid Ranking Principles
+
+The first hybrid implementation should prefer rank fusion over direct raw-score addition. BM25 and cosine similarity use different scales, while reciprocal-rank fusion can combine candidate order without assuming score compatibility.
+
+Hybrid ranking should:
+
+- Retrieve lexical and semantic candidates independently.
+- Normalize or fuse ranks instead of directly adding raw scores.
+- Prefer reciprocal-rank fusion for the first implementation.
+- Preserve exact symbol and structural boosts after candidate fusion.
+- Keep exact paths, symbols, CLI options, and configuration keys strongly lexical.
+
+### Evidence Boundary
+
+Semantic similarity indicates conceptual closeness, not a compiler-resolved relationship or proof that two files implement the same behavior.
+
+Semantic results must continue to report:
+
+- Repository-relative path.
+- Source line range.
+- Chunk type.
+- Retrieval mode.
+- Available lexical and structural evidence.
+
+## Roadmap Status
+
+The original repository-search and documentation-audit milestones are implemented. Optional future retrieval milestones are documented in the [Roadmap](roadmap.md).
